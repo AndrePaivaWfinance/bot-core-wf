@@ -17,3 +17,5 @@ pytest-asyncio==0.21.1
 python-multipart==0.0.6
 pyyaml==6.0.1
 Jinja2==3.1.2
+botbuilder-core>=4.14.0
+botbuilder-schema>=4.14.0

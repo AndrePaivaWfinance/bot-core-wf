@@ -1,23 +1,36 @@
-
-
-
 import os
 from fastapi import APIRouter, Request, Response
 from botbuilder.core import BotFrameworkAdapterSettings, BotFrameworkAdapter, TurnContext, ActivityHandler
+
+from core.brain import BotBrain
+from config import Settings
 
 # Variáveis de ambiente com credenciais do Azure Bot
 MICROSOFT_APP_ID = os.getenv("MICROSOFT_APP_ID", "")
 MICROSOFT_APP_PASSWORD = os.getenv("MICROSOFT_APP_PASSWORD", "")
 
+if not MICROSOFT_APP_ID or not MICROSOFT_APP_PASSWORD:
+    print("Warning: MICROSOFT_APP_ID or MICROSOFT_APP_PASSWORD environment variables are missing.")
+
 # Configuração do adapter do Bot Framework
 adapter_settings = BotFrameworkAdapterSettings(MICROSOFT_APP_ID, MICROSOFT_APP_PASSWORD)
 adapter = BotFrameworkAdapter(adapter_settings)
 
-# Implementação básica do bot
+
+# Implementação do bot integrado com BotBrain
 class TeamsBot(ActivityHandler):
-    async def on_message_activity(self, turn_context: TurnContext):
-        text = turn_context.activity.text.strip() if turn_context.activity.text else ""
-        await turn_context.send_activity(f"Você disse: {text}")
+    def __init__(self):
+        settings = Settings()
+        self.brain = BotBrain(settings)
+
+    async def on_message_activity(self, turn_context: TurnContext) -> None:
+        user_message = turn_context.activity.text.strip() if turn_context.activity.text else ""
+        try:
+            # Processa com o BotBrain
+            response = await self.brain.process_message(user_message)
+        except Exception as e:
+            response = "Desculpe, ocorreu um erro ao processar sua mensagem."
+        await turn_context.send_activity(response)
 
 bot = TeamsBot()
 
@@ -26,6 +39,39 @@ router = APIRouter()
 
 @router.post("/api/messages")
 async def messages(req: Request) -> Response:
-    body = await req.body()
+    body = await req.json()
     auth_header = req.headers.get("Authorization", "")
-    return await adapter.process_activity(body.decode("utf-8"), auth_header, bot.on_turn)
+    return await adapter.process_activity(body, auth_header, bot.on_turn)
+
+
+# Endpoint de teste local para simular uma mensagem recebida do Teams e processada pelo BotBrain.
+from fastapi.testclient import TestClient
+
+@router.post("/test/teams")
+async def test_teams_message():
+    """
+    Endpoint de teste local para simular uma mensagem recebida do Teams e processada pelo BotBrain.
+    """
+    from main import app
+
+    client = TestClient(app)
+
+    fake_activity = {
+        "type": "message",
+        "text": "Olá bot",
+        "from": {"id": "user1"},
+        "recipient": {"id": "bot"},
+        "conversation": {"id": "conv1"},
+        "channelId": "msteams",
+        "id": "msg1",
+        "serviceUrl": "http://localhost"
+    }
+
+    response = client.post("/api/messages", json=fake_activity)
+    return {
+        "status_code": response.status_code,
+        "response": response.text
+    }
+
+# Exemplo de teste com curl:
+# curl -X POST http://localhost:8000/test/teams
