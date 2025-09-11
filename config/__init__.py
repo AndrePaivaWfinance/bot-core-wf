@@ -1,13 +1,8 @@
-"""
-Configuration management.
-Includes settings and Azure-specific configuration.
-"""
+# config/__init__.py
+from .settings import BotConfig as Settings, BotConfig
 
-from .settings import Settings, get_settings
-from .azure_config import AzureConfig
+def get_settings():
+    # compat: alguns módulos antigos podem chamar get_settings()
+    return BotConfig()
 
-__all__ = [
-    'Settings',
-    'get_settings',
-    'AzureConfig'
-]
+__all__ = ["BotConfig", "Settings", "get_settings"]

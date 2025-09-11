@@ -51,3 +51,12 @@ class BotConfig:
         # (Opcional) achatar referências usadas no código legado:
         self.config["primary_llm"] = llm.get("primary_llm", {})
         self.config["fallback_llm"] = llm.get("fallback_llm", {})
+
+        # --- Compatibilidade com código legado ---
+# Alguns módulos importam `Settings` e `get_settings` direto de `config.settings`.
+class Settings(BotConfig):
+    pass
+
+def get_settings():
+    return BotConfig()
+# --- Fim compatibilidade ---
