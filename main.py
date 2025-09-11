@@ -89,8 +89,16 @@ async def health_check(settings: Settings = Depends(get_settings)):
     return {
         "status": "ok",
         "bot": settings.bot.name,
-        "provider_primary": settings.llm.primary_llm.type if settings.llm.primary_llm else "none",
-        "provider_fallback": settings.llm.fallback_llm.type if settings.llm.fallback_llm else "none",
+        "provider_primary": (
+            settings.llm.get("primary_llm", {}).get("type")
+            if isinstance(settings.llm, dict)
+            else getattr(settings.llm.primary_llm, "type", "none")
+        ),
+        "provider_fallback": (
+            settings.llm.get("fallback_llm", {}).get("type")
+            if isinstance(settings.llm, dict)
+            else getattr(settings.llm.fallback_llm, "type", "none")
+        ),
         "version": "1.0.0"
     }
 

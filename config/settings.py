@@ -57,22 +57,58 @@ class Settings(BaseModel):
     
     @classmethod
     def from_yaml(cls, file_path: str = "bot_config.yaml"):
-        with open(file_path, 'r') as f:
-            config_data = yaml.safe_load(f)
-        
-        # Replace environment variables
-        def replace_env_vars(data):
-            if isinstance(data, dict):
-                return {k: replace_env_vars(v) for k, v in data.items()}
-            elif isinstance(data, list):
-                return [replace_env_vars(item) for item in data]
-            elif isinstance(data, str) and data.startswith("${") and data.endswith("}"):
-                env_var = data[2:-1]
-                return os.getenv(env_var, data)
-            return data
-        
-        config_data = replace_env_vars(config_data)
-        return cls(**config_data)
+        if not os.path.exists(file_path):
+            logging.warning(f"{file_path} not found. Falling back to environment variables only.")
+            return cls(
+                bot=BotConfig(
+                    id=os.getenv("BOT_ID", "local-bot"),
+                    name=os.getenv("BOT_NAME", "LocalBot"),
+                    type=os.getenv("BOT_TYPE", "test"),
+                ),
+                llm={},
+                cosmos=CosmosConfig(
+                    endpoint=os.getenv("COSMOS_ENDPOINT"),
+                    key=os.getenv("COSMOS_KEY"),
+                ),
+                blob_storage=BlobStorageConfig(
+                    connection_string=os.getenv("BLOB_STORAGE_CONNECTION_STRING"),
+                ),
+                memory=MemoryConfig(),
+            )
+        try:
+            with open(file_path, 'r') as f:
+                config_data = yaml.safe_load(f)
+
+            def replace_env_vars(data):
+                if isinstance(data, dict):
+                    return {k: replace_env_vars(v) for k, v in data.items()}
+                elif isinstance(data, list):
+                    return [replace_env_vars(item) for item in data]
+                elif isinstance(data, str) and data.startswith("${") and data.endswith("}"):
+                    env_var = data[2:-1]
+                    return os.getenv(env_var, data)
+                return data
+
+            config_data = replace_env_vars(config_data)
+            return cls(**config_data)
+        except Exception as e:
+            logging.error(f"Error loading {file_path}: {e}. Falling back to environment variables only.")
+            return cls(
+                bot=BotConfig(
+                    id=os.getenv("BOT_ID", "local-bot"),
+                    name=os.getenv("BOT_NAME", "LocalBot"),
+                    type=os.getenv("BOT_TYPE", "test"),
+                ),
+                llm={},
+                cosmos=CosmosConfig(
+                    endpoint=os.getenv("COSMOS_ENDPOINT"),
+                    key=os.getenv("COSMOS_KEY"),
+                ),
+                blob_storage=BlobStorageConfig(
+                    connection_string=os.getenv("BLOB_STORAGE_CONNECTION_STRING"),
+                ),
+                memory=MemoryConfig(),
+            )
 
 def get_settings() -> Settings:
     return Settings.from_yaml()
