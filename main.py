@@ -20,6 +20,7 @@ from interfaces.teams_bot import TeamsBotInterface
 from interfaces.email_handler import EmailHandlerInterface
 from utils.logger import get_logger
 from utils.metrics import metrics_router
+from interfaces import teams_interface
 
 logger = get_logger(__name__)
 
@@ -78,8 +79,7 @@ app.add_middleware(
 # Include routers
 app.include_router(metrics_router)
 
-if hasattr(app.state, "teams_interface"):
-    app.include_router(app.state.teams_interface.router)
+app.include_router(teams_interface.router)
 
 if hasattr(app.state, "email_interface"):
     app.include_router(app.state.email_interface.router)
