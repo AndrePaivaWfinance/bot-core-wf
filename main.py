@@ -114,6 +114,7 @@ async def handle_message(
         logger.error(f"Error processing message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/v1/skills/{skill_name}")
 async def invoke_skill(
     skill_name: str,
@@ -131,6 +132,33 @@ async def invoke_skill(
     except Exception as e:
         logger.error(f"Error executing skill {skill_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Endpoint de teste local para simular uma mensagem recebida do Teams
+from fastapi.testclient import TestClient
+
+@app.post("/test/teams")
+async def test_teams_message():
+    """
+    Endpoint de teste local para simular uma mensagem recebida do Teams.
+    """
+    client = TestClient(app)
+
+    fake_activity = {
+        "type": "message",
+        "text": "Olá bot",
+        "from": {"id": "user1"},
+        "recipient": {"id": "bot"},
+        "conversation": {"id": "conv1"},
+        "channelId": "msteams",
+        "id": "msg1",
+        "serviceUrl": "http://localhost"
+    }
+
+    response = client.post("/api/messages", json=fake_activity)
+    return {
+        "status_code": response.status_code,
+        "response": response.text
+    }
 
 if __name__ == "__main__":
     uvicorn.run(
