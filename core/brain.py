@@ -159,14 +159,14 @@ class BotBrain:
         # Initialize LLM providers
         self.primary_provider = None
         self.fallback_provider = None
-        
-        if settings.llm.get("primary_llm"):
-            if settings.llm["primary_llm"]["type"] == "azure_openai":
-                self.primary_provider = AzureOpenAIProvider(settings.llm["primary_llm"])
-        
-        if settings.llm.get("fallback_llm"):
-            if settings.llm["fallback_llm"]["type"] == "claude":
-                self.fallback_provider = ClaudeProvider(settings.llm["fallback_llm"])
+
+        if getattr(settings.llm, "primary_llm", None):
+            if settings.llm.primary_llm.type == "azure_openai":
+                self.primary_provider = AzureOpenAIProvider(settings.llm.primary_llm.dict())
+
+        if getattr(settings.llm, "fallback_llm", None):
+            if settings.llm.fallback_llm.type == "claude":
+                self.fallback_provider = ClaudeProvider(settings.llm.fallback_llm.dict())
     
     @record_metrics
     async def think(self, user_id: str, message: str, channel: str = "http") -> Dict[str, Any]:

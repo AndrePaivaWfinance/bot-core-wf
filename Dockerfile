@@ -17,6 +17,11 @@ COPY . .
 
 # Create non-root user
 RUN useradd -m -u 1000 botuser
+
+# Create cache and templates folders with correct permissions
+RUN mkdir -p /app/.cache /app/templates && \
+    chown -R botuser:botuser /app/.cache /app/templates
+
 USER botuser
 
 # Expose port

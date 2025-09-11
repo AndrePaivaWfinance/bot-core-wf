@@ -77,8 +77,12 @@ app.add_middleware(
 
 # Include routers
 app.include_router(metrics_router)
-app.include_router(app.state.teams_interface.router)
-app.include_router(app.state.email_interface.router)
+
+if hasattr(app.state, "teams_interface"):
+    app.include_router(app.state.teams_interface.router)
+
+if hasattr(app.state, "email_interface"):
+    app.include_router(app.state.email_interface.router)
 
 @app.get("/healthz")
 async def health_check(settings: Settings = Depends(get_settings)):
