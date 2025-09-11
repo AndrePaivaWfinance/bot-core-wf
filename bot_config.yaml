@@ -1,0 +1,82 @@
+bot:
+  id: "mesh-analyst-001"
+  name: "Mesh"
+  type: "financial_analyst"
+  personality_template: "mesh_analyst.yaml"
+
+llm:
+  primary_llm:
+    type: "azure_openai"
+    endpoint: "${AZURE_OPENAI_ENDPOINT}"
+    api_key: "${AZURE_OPENAI_KEY}"
+    deployment_name: "gpt-4"
+    temperature: 0.7
+    max_tokens: 2000
+
+  fallback_llm:
+    type: "claude"
+    api_key: "${CLAUDE_API_KEY}"
+    model: "claude-3-sonnet-20240229"
+    max_tokens: 2000
+
+cosmos:
+  endpoint: "${AZURE_COSMOS_ENDPOINT}"
+  key: "${AZURE_COSMOS_KEY}"
+  database: "bot_memory"
+  ttl_days: 90
+
+blob_storage:
+  connection_string: "${AZURE_STORAGE_CONNECTION_STRING}"
+  container_documents: "bot-documents"
+  container_media: "bot-media"
+  container_logs: "bot-logs"
+
+memory:
+  short_term:
+    max_messages: 20
+    ttl_minutes: 30
+  long_term:
+    enabled: true
+    ttl_days: 90
+    max_memories_per_user: 1000
+  learning:
+    enabled: true
+    min_confidence: 0.7
+    auto_learn: true
+
+skills:
+  registry:
+    - name: "api_caller"
+      enabled: true
+      config:
+        timeout: 30
+        retry_count: 3
+    - name: "report_generator"
+      enabled: true
+      config:
+        templates_path: "templates/reports"
+    - name: "image_generator"
+      enabled: false
+      config:
+        provider: "dall-e"
+
+interfaces:
+  teams:
+    enabled: true
+    app_id: "${TEAMS_APP_ID}"
+    app_password: "${TEAMS_APP_PASSWORD}"
+  email:
+    enabled: true
+    smtp_server: "smtp.office365.com"
+    port: 587
+  whatsapp:
+    enabled: false
+
+monitoring:
+  application_insights:
+    enabled: true
+    connection_string: "${APP_INSIGHTS_CONNECTION_STRING}"
+  metrics:
+    track_usage: true
+    track_costs: true
+    track_performance: true

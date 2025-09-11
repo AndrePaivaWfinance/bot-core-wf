@@ -1,0 +1,86 @@
+bot-framework/
+├── core/
+│   ├── __init__.py
+│   ├── router.py
+│   ├── context_engine.py
+│   ├── brain.py
+│   └── response_builder.py
+├── memory/
+│   ├── __init__.py
+│   ├── short_term.py
+│   ├── long_term.py
+│   ├── learning.py
+│   └── retrieval.py
+├── skills/
+│   ├── __init__.py
+│   ├── base_skill.py
+│   ├── api_caller.py
+│   ├── report_generator.py
+│   ├── image_generator.py
+│   └── skill_registry.py
+├── personality/
+│   ├── __init__.py
+│   ├── personality_loader.py
+│   └── templates/
+│       ├── mesh_analyst.yaml
+│       └── base_template.yaml
+├── interfaces/
+│   ├── __init__.py
+│   ├── teams_bot.py
+│   ├── email_handler.py
+│   └── base_interface.py
+├── config/
+│   ├── __init__.py
+│   ├── settings.py
+│   └── azure_config.py
+├── utils/
+│   ├── __init__.py
+│   ├── logger.py
+│   ├── metrics.py
+│   └── helpers.py
+├── tests/
+│   ├── __init__.py
+│   ├── test_health.py
+│   ├── test_memory.py
+│   └── test_skills.py
+├── main.py
+├── requirements.txt
+├── Dockerfile
+├── .env.example
+├── bot_config.yaml
+└── README.md
+
+
+
+
+# Bot Framework
+
+A generic bot framework with memory, continuous learning, and skills support.
+
+## Features
+
+- Multi-channel support (HTTP, Teams, Email)
+- Short-term and long-term memory with Azure Cosmos DB
+- Continuous learning system
+- Dynamic skill registry
+- RAG (Retrieval Augmented Generation) capabilities
+- Multiple LLM providers (Azure OpenAI primary, Claude fallback)
+- Structured logging and metrics
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.11
+- Azure account (for Cosmos DB, Blob Storage, OpenAI)
+- Docker (optional)
+
+### Local Development
+
+1. Clone the repository
+2. Create virtual environment:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # Linux/Mac
+   # or
+   .venv\Scripts\activate  # Windows
