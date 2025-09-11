@@ -16,7 +16,7 @@ from memory.long_term import LongTermMemory
 from memory.learning import LearningSystem
 from memory.retrieval import RetrievalSystem
 from skills.skill_registry import SkillRegistry
-from interfaces.teams_bot import TeamsBotInterface
+from interfaces.teams_interface import TeamsBot
 from interfaces.email_handler import EmailHandlerInterface
 from utils.logger import get_logger
 from utils.metrics import metrics_router
@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
     )
     
     # Initialize interfaces
-    app.state.teams_interface = TeamsBotInterface(settings, app.state.brain)
+    app.state.teams_interface = TeamsBot(app.state.brain)
     app.state.email_interface = EmailHandlerInterface(settings, app.state.brain)
     
     logger.info("Bot framework started successfully")
