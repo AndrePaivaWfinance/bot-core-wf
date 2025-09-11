@@ -1,78 +1,53 @@
-import os
-import yaml
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
-from dotenv import load_dotenv
-import logging
+# config/settings.py
+import os, re, copy, yaml
+from typing import Any, Dict
 
-# Load environment variables
-load_dotenv()
+ENV_PATTERN = re.compile(r"\$\{([^}]+)\}")
 
-class LLMConfig(BaseModel):
-    type: str
-    endpoint: Optional[str] = None
-    api_key: Optional[str] = None
-    deployment_name: Optional[str] = None
-    temperature: float = 0.7
-    max_tokens: int = 2000
-    model: Optional[str] = None
+def _expand_env(value: Any) -> Any:
+    if isinstance(value, str):
+        m = ENV_PATTERN.search(value)
+        if m:
+            var = m.group(1)
+            return os.getenv(var, "")
+        return value
+    if isinstance(value, dict):
+        return {k: _expand_env(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env(v) for v in value]
+    return value
 
-class CosmosConfig(BaseModel):
-    endpoint: Optional[str] = None
-    key: Optional[str] = None
-    database: str = "bot_memory"
-    ttl_days: int = 90
+class BotConfig:
+    def __init__(self, config_path: str = "bot_config.yaml"):
+        self.config = self._load_config(config_path)
+        self._apply_env_overrides()
 
-class BlobStorageConfig(BaseModel):
-    connection_string: Optional[str] = None
-    container_documents: str = "bot-documents"
-    container_media: str = "bot-media"
-    container_logs: str = "bot-logs"
+    def _load_config(self, path: str) -> Dict[str, Any]:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+        # 1) expande ${ENV}
+        expanded = _expand_env(raw)
+        return expanded
 
-class MemoryConfig(BaseModel):
-    short_term: Dict[str, Any] = Field(default_factory=dict)
-    long_term: Dict[str, Any] = Field(default_factory=dict)
-    learning: Dict[str, Any] = Field(default_factory=dict)
+    def _apply_env_overrides(self):
+        # 2) overrides específicos que frequentemente precisamos
+        llm = self.config.get("llm", {})
+        if "primary_llm" in llm:
+            p = llm["primary_llm"]
+            p["endpoint"] = os.getenv("AZURE_OPENAI_ENDPOINT", p.get("endpoint", ""))
+            p["api_key"]  = os.getenv("AZURE_OPENAI_KEY", p.get("api_key", ""))
 
-class SkillConfig(BaseModel):
-    name: str
-    enabled: bool = True
-    config: Dict[str, Any] = Field(default_factory=dict)
+        fb = llm.get("fallback_llm", {})
+        if fb:
+            fb["api_key"] = os.getenv("CLAUDE_API_KEY", fb.get("api_key", ""))
 
-class BotConfig(BaseModel):
-    id: str
-    name: str
-    type: str
-    personality_template: str = "base_template.yaml"
+        cosmos = self.config.get("cosmos", {})
+        cosmos["endpoint"] = os.getenv("AZURE_COSMOS_ENDPOINT", cosmos.get("endpoint", ""))
+        cosmos["key"]      = os.getenv("AZURE_COSMOS_KEY", cosmos.get("key", ""))
 
-class Settings(BaseModel):
-    bot: BotConfig
-    llm: Dict[str, Optional[LLMConfig]] = Field(default_factory=dict)
-    cosmos: CosmosConfig
-    blob_storage: BlobStorageConfig
-    memory: MemoryConfig
-    skills: Dict[str, Any] = Field(default_factory=dict)
-    interfaces: Dict[str, Any] = Field(default_factory=dict)
-    monitoring: Dict[str, Any] = Field(default_factory=dict)
-    
-    @classmethod
-    def from_yaml(cls, file_path: str = "bot_config.yaml"):
-        with open(file_path, 'r') as f:
-            config_data = yaml.safe_load(f)
-        
-        # Replace environment variables
-        def replace_env_vars(data):
-            if isinstance(data, dict):
-                return {k: replace_env_vars(v) for k, v in data.items()}
-            elif isinstance(data, list):
-                return [replace_env_vars(item) for item in data]
-            elif isinstance(data, str) and data.startswith("${") and data.endswith("}"):
-                env_var = data[2:-1]
-                return os.getenv(env_var, data)
-            return data
-        
-        config_data = replace_env_vars(config_data)
-        return cls(**config_data)
+        blob = self.config.get("blob_storage", {})
+        blob["connection_string"] = os.getenv("AZURE_STORAGE_CONNECTION", blob.get("connection_string", ""))
 
-def get_settings() -> Settings:
-    return Settings.from_yaml()
+        # (Opcional) achatar referências usadas no código legado:
+        self.config["primary_llm"] = llm.get("primary_llm", {})
+        self.config["fallback_llm"] = llm.get("fallback_llm", {})
