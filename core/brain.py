@@ -170,6 +170,26 @@ class BotBrain:
     
     @record_metrics
     async def think(self, user_id: str, message: str, channel: str = "http") -> Dict[str, Any]:
+        if getattr(self.settings, "mock_mode", False):
+            context = await self._build_context(user_id, message)
+            if "qual é o meu nome" in message.lower():
+                stored_name = context.get("user_name")
+                if stored_name:
+                    return {
+                        "response": f"Seu nome é {stored_name}",
+                        "metadata": {"provider": "memory", "confidence": 0.95, "usage": {}, "context_used": ["short_term"]}
+                    }
+            if "meu nome é" in message.lower():
+                user_name = message.split("é")[-1].strip()
+                await self.short_term_memory.store(user_id, {"user_name": user_name})
+                return {
+                    "response": f"Prazer, {user_name}!",
+                    "metadata": {"provider": "memory", "confidence": 0.95, "usage": {}, "context_used": ["short_term"]}
+                }
+            return {
+                "response": "Olá, eu sou o bot em modo teste!",
+                "metadata": {"provider": "mock", "confidence": 0.99, "usage": {}, "context_used": []}
+            }
         # Build context
         context = await self._build_context(user_id, message)
         
