@@ -5,7 +5,7 @@ bot:
   personality_template: "mesh_analyst.yaml"
 
 llm:
-  primary_llm:
+  primary:
     type: "azure_openai"
     endpoint: ${AZURE_OPENAI_ENDPOINT}  # definido via variável de ambiente
     api_key: ${AZURE_OPENAI_KEY}  # definido via variável de ambiente

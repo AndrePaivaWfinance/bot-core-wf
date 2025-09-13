@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
-import httpx
+from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 import numpy as np
 
@@ -27,86 +27,57 @@ class LLMProvider(ABC):
 class AzureOpenAIProvider(LLMProvider):
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.client = httpx.AsyncClient()
+        self.client = OpenAI(
+            api_key=config["api_key"],
+            base_url=f"{config['endpoint']}openai/deployments/{config['deployment_name']}/chat/completions?api-version={config.get('api_version')}"
+        )
+        logger.debug(f"AzureOpenAIProvider initialized with api_version={config.get('api_version')}")
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def generate(self, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            headers = {
-                "Content-Type": "application/json",
-                "api-key": self.config["api_key"]
-            }
-            
-            payload = {
-                "messages": [
+            logger.debug(f"Azure client base_url={self.client.base_url}")
+            logger.debug(f"Azure deployment_name={self.config['deployment_name']}")
+            logger.debug(f"Calling AzureOpenAI with endpoint={self.config['endpoint']}, "
+                         f"deployment={self.config['deployment_name']}, "
+                         f"api_version={self.config.get('api_version')}")
+            response = await self.client.chat.completions.create(
+                model=self.config["model"],
+                messages=[
                     {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
-                "temperature": self.config.get("temperature", 0.7),
-                "max_tokens": self.config.get("max_tokens", 2000)
-            }
-            
-            response = await self.client.post(
-                f"{self.config['endpoint'].rstrip('/')}/openai/deployments/{self.config.get('deployment_name', 'gpt-4o')}/chat/completions?api-version={self.config.get('api_version', '2024-12-01-preview')}",
-                headers=headers,
-                json=payload,
-                timeout=30.0
+                temperature=self.config.get("temperature", 0.7),
+                max_tokens=self.config.get("max_tokens", 2000)
             )
-            
-            logger.debug(f"Azure response status={response.status_code}, body={response.text}")
-            if response.is_error:
-                logger.error(f"Azure OpenAI error: {response.status_code} - {response.text}")
-                response.raise_for_status()
-            result = response.json()
-            
+            logger.debug(f"Azure Chat full response: {response}")
+            logger.error(f"Azure response: {response}")
+            logger.debug(f"Azure raw response: {response}")
+            logger.info(f"Azure raw response: {response}")
             return {
-                "text": result["choices"][0]["message"]["content"],
-                "usage": result.get("usage", {}),
-                "provider": "azure_openai"
+                "text": response.choices[0].message.content,
+                "usage": response.usage,
+                "provider": "azure_openai",
             }
-            
         except Exception as e:
-            if hasattr(e, "response") and e.response is not None:
-                logger.error(
-                    f"Azure OpenAI error: {e.response.status_code} - {e.response.text}"
-                )
-            else:
-                logger.error(f"Azure OpenAI error: {str(e)}")
+            import traceback
+            logger.error(str(e))
+            logger.exception("AzureOpenAIProvider.generate failed")
             raise
     
     async def get_embedding(self, text: str) -> list:
         try:
-            headers = {
-                "Content-Type": "application/json",
-                "api-key": self.config["api_key"]
-            }
-            
-            payload = {
-                "input": text
-            }
-            
-            response = await self.client.post(
-                f"{self.config['endpoint'].rstrip('/')}/openai/deployments/{self.config.get('embedding_deployment', 'text-embedding-3-large')}/embeddings?api-version={self.config.get('api_version', '2024-12-01-preview')}",
-                headers=headers,
-                json=payload,
-                timeout=30.0
+            logger.debug(f"Calling AzureOpenAI Embeddings with endpoint={self.config['endpoint']}, "
+                         f"model={self.config.get('embedding_deployment', 'text-embedding-3-large')}")
+            response = await self.client.embeddings.create(
+                model=self.config.get("embedding_deployment", "text-embedding-3-large"),
+                input=text
             )
-            
-            logger.debug(f"Azure embedding response status={response.status_code}, body={response.text}")
-            if response.is_error:
-                logger.error(f"Azure OpenAI embedding error: {response.status_code} - {response.text}")
-                response.raise_for_status()
-            result = response.json()
-            
-            return result["data"][0]["embedding"]
-            
+            logger.debug(f"Azure Embeddings full response: {response}")
+            return response.data[0].embedding
         except Exception as e:
-            if hasattr(e, "response") and e.response is not None:
-                logger.error(
-                    f"Azure OpenAI embedding error: {e.response.status_code} - {e.response.text}"
-                )
-            else:
-                logger.error(f"Azure OpenAI embedding error: {str(e)}")
+            import traceback
+            logger.error(f"Azure OpenAI embedding error: {str(e)}\n{traceback.format_exc()}")
             raise
 
 class ClaudeProvider(LLMProvider):
@@ -214,12 +185,14 @@ class BotBrain:
         provider_used = "none"
         
         try:
+            logger.debug(">>> Entering primary provider generate()")
             if self.primary_provider:
                 response = await self.primary_provider.generate(message, context)
+                logger.info(f"Provider used: primary, response: {response}")
                 provider_used = "primary"
         except Exception as e:
             import traceback
-            logger.warning(f"Primary provider failed: {str(e)}\n{traceback.format_exc()}")
+            logger.exception("Primary provider failed")
             if self.fallback_provider:
                 try:
                     response = await self.fallback_provider.generate(message, context)
@@ -242,6 +215,7 @@ class BotBrain:
         # Store interaction
         await self._store_interaction(user_id, message, response["text"], context, confidence)
         
+        logger.debug(f"<<< Provider used: {provider_used}, response={response}")
         return {
             "response": response["text"],
             "metadata": {

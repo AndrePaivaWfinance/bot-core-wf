@@ -16,6 +16,7 @@ class LLMConfig(BaseModel):
     temperature: float = 0.7
     max_tokens: int = 2000
     model: Optional[str] = Field(default=None, env="AZURE_OPENAI_MODEL")
+    api_version: Optional[str] = Field(default="2024-12-01-preview", env="AZURE_OPENAI_API_VERSION")
 
 class ClaudeConfig(BaseModel):
     api_key: Optional[str] = Field(default=None, env="CLAUDE_API_KEY")
@@ -79,6 +80,7 @@ class Settings(BaseModel):
                     api_key=os.getenv("AZURE_OPENAI_KEY"),
                     deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
                     model=os.getenv("AZURE_OPENAI_MODEL"),
+                    api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
                 )},
                 cosmos=CosmosConfig(
                     endpoint=os.getenv("COSMOS_ENDPOINT"),
@@ -125,6 +127,7 @@ class Settings(BaseModel):
                     api_key=os.getenv("AZURE_OPENAI_KEY"),
                     deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
                     model=os.getenv("AZURE_OPENAI_MODEL"),
+                    api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
                 )},
                 cosmos=CosmosConfig(
                     endpoint=os.getenv("COSMOS_ENDPOINT"),
