@@ -47,7 +47,7 @@ class AzureOpenAIProvider(LLMProvider):
             }
             
             response = await self.client.post(
-                f"{self.config['endpoint']}/openai/deployments/{self.config['deployment_name']}/chat/completions?api-version=2023-05-15",
+                f"{self.config['endpoint'].rstrip('/')}/openai/deployments/{self.config.get('deployment_name', 'gpt-4o')}/chat/completions?api-version={self.config.get('api_version', '2024-12-01-preview')}",
                 headers=headers,
                 json=payload,
                 timeout=30.0
@@ -78,7 +78,7 @@ class AzureOpenAIProvider(LLMProvider):
             }
             
             response = await self.client.post(
-                f"{self.config['endpoint']}/openai/deployments/{self.config.get('embedding_deployment', 'text-embedding-ada-002')}/embeddings?api-version=2023-05-15",
+                f"{self.config['endpoint'].rstrip('/')}/openai/deployments/{self.config.get('embedding_deployment', 'text-embedding-3-large')}/embeddings?api-version={self.config.get('api_version', '2024-12-01-preview')}",
                 headers=headers,
                 json=payload,
                 timeout=30.0
@@ -104,7 +104,7 @@ class ClaudeProvider(LLMProvider):
             headers = {
                 "Content-Type": "application/json",
                 "x-api-key": self.config["api_key"],
-                "anthropic-version": "2023-06-01"
+                "anthropic-version": self.config.get("api_version", "2023-06-01")
             }
             
             payload = {
@@ -160,13 +160,13 @@ class BotBrain:
         self.primary_provider = None
         self.fallback_provider = None
 
-        if getattr(settings.llm, "primary_llm", None):
-            if settings.llm.primary_llm.type == "azure_openai":
-                self.primary_provider = AzureOpenAIProvider(settings.llm.primary_llm.dict())
+        if isinstance(settings.llm, dict) and "primary" in settings.llm:
+            primary_cfg = settings.llm["primary"]
+            if primary_cfg and primary_cfg.type == "azure_openai":
+                self.primary_provider = AzureOpenAIProvider(primary_cfg.dict())
 
-        if getattr(settings.llm, "fallback_llm", None):
-            if settings.llm.fallback_llm.type == "claude":
-                self.fallback_provider = ClaudeProvider(settings.llm.fallback_llm.dict())
+        if getattr(settings, "claude", None) and settings.claude.api_key:
+            self.fallback_provider = ClaudeProvider(settings.claude.dict())
     
     @record_metrics
     async def think(self, user_id: str, message: str, channel: str = "http") -> Dict[str, Any]:

@@ -10,12 +10,16 @@ load_dotenv()
 
 class LLMConfig(BaseModel):
     type: str
-    endpoint: Optional[str] = None
-    api_key: Optional[str] = None
-    deployment_name: Optional[str] = None
+    endpoint: Optional[str] = Field(default=None, env="AZURE_OPENAI_ENDPOINT")
+    api_key: Optional[str] = Field(default=None, env="AZURE_OPENAI_KEY")
+    deployment_name: Optional[str] = Field(default=None, env="AZURE_OPENAI_DEPLOYMENT")
     temperature: float = 0.7
     max_tokens: int = 2000
-    model: Optional[str] = None
+    model: Optional[str] = Field(default=None, env="AZURE_OPENAI_MODEL")
+
+class ClaudeConfig(BaseModel):
+    api_key: Optional[str] = Field(default=None, env="CLAUDE_API_KEY")
+    api_version: str = Field(default="2023-06-01", env="CLAUDE_API_VERSION")
 
 class CosmosConfig(BaseModel):
     endpoint: Optional[str] = None
@@ -45,6 +49,9 @@ class BotConfig(BaseModel):
     type: str
     personality_template: str = "base_template.yaml"
 
+class MonitoringConfig(BaseModel):
+    app_insights_connection_string: Optional[str] = Field(default=None, env="APP_INSIGHTS_CONNECTION_STRING")
+
 class Settings(BaseModel):
     bot: BotConfig
     llm: Dict[str, Optional[LLMConfig]] = Field(default_factory=dict)
@@ -53,7 +60,8 @@ class Settings(BaseModel):
     memory: MemoryConfig
     skills: Dict[str, Any] = Field(default_factory=dict)
     interfaces: Dict[str, Any] = Field(default_factory=dict)
-    monitoring: Dict[str, Any] = Field(default_factory=dict)
+    monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+    claude: ClaudeConfig = Field(default_factory=ClaudeConfig)
     
     @classmethod
     def from_yaml(cls, file_path: str = "bot_config.yaml"):

@@ -9,7 +9,7 @@ llm:
     type: "azure_openai"
     endpoint: "${AZURE_OPENAI_ENDPOINT}"
     api_key: "${AZURE_OPENAI_KEY}"
-    deployment_name: "gpt-4"
+    deployment_name: "gpt-4o"
     temperature: 0.7
     max_tokens: 2000
 
