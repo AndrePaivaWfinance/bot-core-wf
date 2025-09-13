@@ -26,11 +26,11 @@ RUN mkdir -p /app/.cache /app/templates && \
 USER botuser
 
 # Expose port
-EXPOSE 8000
+EXPOSE 80
 
 # Set environment variables
 ENV PYTHONPATH=/app
-ENV PORT=8000
+ENV PORT=80
 
 # Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]

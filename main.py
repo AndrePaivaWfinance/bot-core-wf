@@ -7,6 +7,9 @@ import os
 from types import SimpleNamespace
 from pydantic import BaseModel
 
+from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext
+from botbuilder.schema import Activity
+
 class ConfigNS(SimpleNamespace):
     def get(self, key, default=None):
         return getattr(self, key, default)
@@ -188,6 +191,32 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+APP_ID = os.getenv("MICROSOFT_APP_ID", "")
+APP_PASSWORD = os.getenv("MICROSOFT_APP_PASSWORD", "")
+adapter_settings = BotFrameworkAdapterSettings(APP_ID, APP_PASSWORD)
+adapter = BotFrameworkAdapter(adapter_settings)
+
+class EchoBot:
+    async def on_turn(self, turn_context: TurnContext):
+        if turn_context.activity.type == "message":
+            await turn_context.send_activity(f"Você disse: {turn_context.activity.text}")
+
+bot = EchoBot()
+
+@app.post("/api/messages")
+async def messages(request: Request):
+    body = await request.json()
+    activity = Activity().deserialize(body)
+    auth_header = request.headers.get("Authorization", "")
+
+    async def aux(turn_context: TurnContext):
+        await bot.on_turn(turn_context)
+
+    response = await adapter.process_activity(activity, auth_header, aux)
+    if response:
+        return response.body
+    return {"status": "ok"}
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -295,6 +324,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=int(os.getenv("PORT", 80)),  # Usa PORT definida pelo Azure ou cai no 80
         reload=os.getenv("UVICORN_RELOAD", "true").lower() == "true"
     )

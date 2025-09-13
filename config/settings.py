@@ -73,7 +73,13 @@ class Settings(BaseModel):
                     name=os.getenv("BOT_NAME", "LocalBot"),
                     type=os.getenv("BOT_TYPE", "test"),
                 ),
-                llm={},
+                llm={"primary": LLMConfig(
+                    type="azure_openai",
+                    endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+                    api_key=os.getenv("AZURE_OPENAI_KEY"),
+                    deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+                    model=os.getenv("AZURE_OPENAI_MODEL"),
+                )},
                 cosmos=CosmosConfig(
                     endpoint=os.getenv("COSMOS_ENDPOINT"),
                     key=os.getenv("COSMOS_KEY"),
@@ -94,7 +100,7 @@ class Settings(BaseModel):
                     return [replace_env_vars(item) for item in data]
                 elif isinstance(data, str) and data.startswith("${") and data.endswith("}"):
                     env_var = data[2:-1]
-                    return os.getenv(env_var, data)
+                    return os.getenv(env_var, None)
                 return data
 
             config_data = replace_env_vars(config_data)
@@ -107,7 +113,13 @@ class Settings(BaseModel):
                     name=os.getenv("BOT_NAME", "LocalBot"),
                     type=os.getenv("BOT_TYPE", "test"),
                 ),
-                llm={},
+                llm={"primary": LLMConfig(
+                    type="azure_openai",
+                    endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+                    api_key=os.getenv("AZURE_OPENAI_KEY"),
+                    deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+                    model=os.getenv("AZURE_OPENAI_MODEL"),
+                )},
                 cosmos=CosmosConfig(
                     endpoint=os.getenv("COSMOS_ENDPOINT"),
                     key=os.getenv("COSMOS_KEY"),
