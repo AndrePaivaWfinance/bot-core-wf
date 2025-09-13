@@ -100,7 +100,13 @@ class Settings(BaseModel):
                     return [replace_env_vars(item) for item in data]
                 elif isinstance(data, str) and data.startswith("${") and data.endswith("}"):
                     env_var = data[2:-1]
-                    return os.getenv(env_var, None)
+                    value = os.getenv(env_var, None)
+                    if value is None or value == "":
+                        logging.warning(f"Environment variable {env_var} not set or empty.")
+                    return value
+                elif data is None or (isinstance(data, str) and data.strip() == ""):
+                    # Try to map empty values to env vars with same key
+                    return None
                 return data
 
             config_data = replace_env_vars(config_data)

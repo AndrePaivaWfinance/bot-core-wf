@@ -53,7 +53,10 @@ class AzureOpenAIProvider(LLMProvider):
                 timeout=30.0
             )
             
-            response.raise_for_status()
+            logger.debug(f"Azure response status={response.status_code}, body={response.text}")
+            if response.is_error:
+                logger.error(f"Azure OpenAI error: {response.status_code} - {response.text}")
+                response.raise_for_status()
             result = response.json()
             
             return {
@@ -63,7 +66,12 @@ class AzureOpenAIProvider(LLMProvider):
             }
             
         except Exception as e:
-            logger.error(f"Azure OpenAI error: {str(e)}")
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(
+                    f"Azure OpenAI error: {e.response.status_code} - {e.response.text}"
+                )
+            else:
+                logger.error(f"Azure OpenAI error: {str(e)}")
             raise
     
     async def get_embedding(self, text: str) -> list:
@@ -84,13 +92,21 @@ class AzureOpenAIProvider(LLMProvider):
                 timeout=30.0
             )
             
-            response.raise_for_status()
+            logger.debug(f"Azure embedding response status={response.status_code}, body={response.text}")
+            if response.is_error:
+                logger.error(f"Azure OpenAI embedding error: {response.status_code} - {response.text}")
+                response.raise_for_status()
             result = response.json()
             
             return result["data"][0]["embedding"]
             
         except Exception as e:
-            logger.error(f"Azure OpenAI embedding error: {str(e)}")
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(
+                    f"Azure OpenAI embedding error: {e.response.status_code} - {e.response.text}"
+                )
+            else:
+                logger.error(f"Azure OpenAI embedding error: {str(e)}")
             raise
 
 class ClaudeProvider(LLMProvider):
@@ -202,7 +218,8 @@ class BotBrain:
                 response = await self.primary_provider.generate(message, context)
                 provider_used = "primary"
         except Exception as e:
-            logger.warning(f"Primary provider failed: {str(e)}")
+            import traceback
+            logger.warning(f"Primary provider failed: {str(e)}\n{traceback.format_exc()}")
             if self.fallback_provider:
                 try:
                     response = await self.fallback_provider.generate(message, context)
