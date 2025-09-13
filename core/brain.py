@@ -108,7 +108,7 @@ class ClaudeProvider(LLMProvider):
             }
             
             payload = {
-                "model": self.config.get("model", "claude-3-opus-20240229"),
+                "model": self.config.get("model", "claude-sonnet-4-20250514"),
                 "max_tokens": self.config.get("max_tokens", 2000),
                 "messages": [
                     {"role": "user", "content": prompt}
