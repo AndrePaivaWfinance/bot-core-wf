@@ -28,9 +28,6 @@ class TeamsBotInterface(BaseInterface):
         response["metadata"].update(teams_metadata)
         
         logger.debug("Processed Teams message", user_id=message.get("user_id"))
-<<<<<<< HEAD
-        return response
-=======
         return response
 
     async def on_turn(self, turn_context):
@@ -46,4 +43,3 @@ class TeamsBotInterface(BaseInterface):
         }
         response = await self.handle_message(message)
         await turn_context.send_activity(response.get("text", ""))
->>>>>>> resgate-eb512f
