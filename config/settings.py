@@ -51,7 +51,12 @@ class BotConfig(BaseModel):
     personality_template: str = "base_template.yaml"
 
 class MonitoringConfig(BaseModel):
-    app_insights_connection_string: Optional[str] = Field(default=None, env="APP_INSIGHTS_CONNECTION_STRING")
+    app_insights_connection_string: Optional[str] = Field(default=None, env=["APP_INSIGHTS_CONNECTION_STRING", "APPLICATIONINSIGHTS_CONNECTION_STRING"])
+
+class TeamsConfig(BaseModel):
+    app_id: Optional[str] = None
+    app_password: Optional[str] = None
+    tenant_id: Optional[str] = None
 
 class Settings(BaseModel):
     bot: BotConfig
@@ -63,6 +68,11 @@ class Settings(BaseModel):
     interfaces: Dict[str, Any] = Field(default_factory=dict)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     claude: ClaudeConfig = Field(default_factory=ClaudeConfig)
+    teams: TeamsConfig = Field(default_factory=lambda: TeamsConfig(
+        app_id=os.getenv("TEAMS_APP_ID") or os.getenv("MICROSOFT_APP_ID") or os.getenv("MicrosoftAppId"),
+        app_password=os.getenv("TEAMS_APP_PASSWORD") or os.getenv("MICROSOFT_APP_PASSWORD") or os.getenv("MicrosoftAppPassword"),
+        tenant_id=os.getenv("TEAMS_TENANT_ID") or os.getenv("MICROSOFT_APP_TENANT_ID") or os.getenv("MicrosoftAppTenantId"),
+    ))
     
     @classmethod
     def from_yaml(cls, file_path: str = "bot_config.yaml"):
@@ -83,13 +93,22 @@ class Settings(BaseModel):
                     api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
                 )},
                 cosmos=CosmosConfig(
-                    endpoint=os.getenv("COSMOS_ENDPOINT"),
-                    key=os.getenv("COSMOS_KEY"),
+                    endpoint=os.getenv("COSMOS_ENDPOINT") or os.getenv("AZURE_COSMOS_ENDPOINT") or os.getenv("AZURE_COSMOSDB_ACCOUNT"),
+                    key=os.getenv("COSMOS_KEY") or os.getenv("AZURE_COSMOS_KEY") or os.getenv("AZURE_COSMOSDB_KEY"),
+                    database=os.getenv("AZURE_COSMOSDB_DATABASE", "bot_memory"),
                 ),
                 blob_storage=BlobStorageConfig(
-                    connection_string=os.getenv("BLOB_STORAGE_CONNECTION_STRING"),
+                    connection_string=os.getenv("BLOB_STORAGE_CONNECTION_STRING") or os.getenv("AZURE_STORAGE_CONNECTION_STRING"),
                 ),
                 memory=MemoryConfig(),
+                monitoring=MonitoringConfig(
+                    app_insights_connection_string=os.getenv("APP_INSIGHTS_CONNECTION_STRING") or os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+                ),
+                teams=TeamsConfig(
+                    app_id=os.getenv("TEAMS_APP_ID") or os.getenv("MICROSOFT_APP_ID") or os.getenv("MicrosoftAppId"),
+                    app_password=os.getenv("TEAMS_APP_PASSWORD") or os.getenv("MICROSOFT_APP_PASSWORD") or os.getenv("MicrosoftAppPassword"),
+                    tenant_id=os.getenv("TEAMS_TENANT_ID") or os.getenv("MICROSOFT_APP_TENANT_ID") or os.getenv("MicrosoftAppTenantId"),
+                )
             )
         try:
             with open(file_path, 'r') as f:
@@ -130,13 +149,22 @@ class Settings(BaseModel):
                     api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
                 )},
                 cosmos=CosmosConfig(
-                    endpoint=os.getenv("COSMOS_ENDPOINT"),
-                    key=os.getenv("COSMOS_KEY"),
+                    endpoint=os.getenv("COSMOS_ENDPOINT") or os.getenv("AZURE_COSMOS_ENDPOINT") or os.getenv("AZURE_COSMOSDB_ACCOUNT"),
+                    key=os.getenv("COSMOS_KEY") or os.getenv("AZURE_COSMOS_KEY") or os.getenv("AZURE_COSMOSDB_KEY"),
+                    database=os.getenv("AZURE_COSMOSDB_DATABASE", "bot_memory"),
                 ),
                 blob_storage=BlobStorageConfig(
-                    connection_string=os.getenv("BLOB_STORAGE_CONNECTION_STRING"),
+                    connection_string=os.getenv("BLOB_STORAGE_CONNECTION_STRING") or os.getenv("AZURE_STORAGE_CONNECTION_STRING"),
                 ),
                 memory=MemoryConfig(),
+                monitoring=MonitoringConfig(
+                    app_insights_connection_string=os.getenv("APP_INSIGHTS_CONNECTION_STRING") or os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+                ),
+                teams=TeamsConfig(
+                    app_id=os.getenv("TEAMS_APP_ID") or os.getenv("MICROSOFT_APP_ID") or os.getenv("MicrosoftAppId"),
+                    app_password=os.getenv("TEAMS_APP_PASSWORD") or os.getenv("MICROSOFT_APP_PASSWORD") or os.getenv("MicrosoftAppPassword"),
+                    tenant_id=os.getenv("TEAMS_TENANT_ID") or os.getenv("MICROSOFT_APP_TENANT_ID") or os.getenv("MicrosoftAppTenantId"),
+                )
             )
 
 def get_settings() -> Settings:

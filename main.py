@@ -4,6 +4,7 @@ from typing import Dict, Any
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+import os
 
 # Setup logging first
 from utils.logger import setup_logging, get_logger
@@ -201,79 +202,81 @@ async def health_check():
     health_status["version"] = "1.0.0"
     return health_status
 
-@app.post("/v1/messages")
-async def handle_message(request: Dict[str, Any]):
-    """
-    Processa uma mensagem através do bot.
-    
-    Payload esperado:
-    {
-        "user_id": "string",
-        "message": "string",
-        "channel": "string" (opcional, default: "http")
-    }
-    """
-    
-    # Validação de entrada
-    user_id = request.get("user_id")
-    message = request.get("message")
-    channel = request.get("channel", "http")
-    
-    if not user_id or not message:
-        raise HTTPException(
-            status_code=400, 
-            detail="Both 'user_id' and 'message' are required"
-        )
-    
-    # Verifica se o brain está disponível
-    if 'brain' not in app_components:
-        raise HTTPException(
-            status_code=503,
-            detail="Bot brain is not initialized. Please check the logs."
-        )
-    
-    try:
-        logger.info(f"Processing message from user: {user_id}")
-        
-        # Processa a mensagem
-        response = await app_components['brain'].think(
-            user_id=user_id,
-            message=message,
-            channel=channel
-        )
-        
-        logger.info(f"Response generated successfully for user: {user_id}")
-        return response
-        
-    except Exception as e:
-        logger.error(f"Error processing message: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+if os.getenv("ENV") != "production":
 
-@app.post("/test/message")
-async def test_message():
-    """
-    Endpoint de teste para verificar se o bot está funcionando.
-    Envia uma mensagem simples e retorna a resposta.
-    """
-    
-    test_request = {
-        "user_id": "test_user",
-        "message": "Olá, qual é seu nome?",
-        "channel": "test"
-    }
-    
-    try:
-        response = await handle_message(test_request)
-        return {
-            "test": "success",
-            "request": test_request,
-            "response": response
+    @app.post("/v1/messages")
+    async def handle_message(request: Dict[str, Any]):
+        """
+        Processa uma mensagem através do bot.
+        
+        Payload esperado:
+        {
+            "user_id": "string",
+            "message": "string",
+            "channel": "string" (opcional, default: "http")
         }
-    except Exception as e:
-        return {
-            "test": "failed",
-            "error": str(e)
+        """
+        
+        # Validação de entrada
+        user_id = request.get("user_id")
+        message = request.get("message")
+        channel = request.get("channel", "http")
+        
+        if not user_id or not message:
+            raise HTTPException(
+                status_code=400, 
+                detail="Both 'user_id' and 'message' are required"
+            )
+        
+        # Verifica se o brain está disponível
+        if 'brain' not in app_components:
+            raise HTTPException(
+                status_code=503,
+                detail="Bot brain is not initialized. Please check the logs."
+            )
+        
+        try:
+            logger.info(f"Processing message from user: {user_id}")
+            
+            # Processa a mensagem
+            response = await app_components['brain'].think(
+                user_id=user_id,
+                message=message,
+                channel=channel
+            )
+            
+            logger.info(f"Response generated successfully for user: {user_id}")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error processing message: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/test/message")
+    async def test_message():
+        """
+        Endpoint de teste para verificar se o bot está funcionando.
+        Envia uma mensagem simples e retorna a resposta.
+        """
+        
+        test_request = {
+            "user_id": "test_user",
+            "message": "Olá, qual é seu nome?",
+            "channel": "test"
         }
+        
+        try:
+            response = await handle_message(test_request)
+            return {
+                "test": "success",
+                "request": test_request,
+                "response": response
+            }
+        except Exception as e:
+            return {
+                "test": "failed",
+                "error": str(e)
+            }
 
 @app.post("/v1/skills/{skill_name}")
 async def invoke_skill(skill_name: str, parameters: Dict[str, Any]):
