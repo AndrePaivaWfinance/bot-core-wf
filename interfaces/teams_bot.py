@@ -28,4 +28,22 @@ class TeamsBotInterface(BaseInterface):
         response["metadata"].update(teams_metadata)
         
         logger.debug("Processed Teams message", user_id=message.get("user_id"))
+<<<<<<< HEAD
         return response
+=======
+        return response
+
+    async def on_turn(self, turn_context):
+        message_text = turn_context.activity.text
+        message = {
+            "text": message_text,
+            "user_id": getattr(turn_context.activity.from_property, "id", None),
+            "teams_context": {
+                "conversation": getattr(turn_context.activity.conversation, "id", None),
+                "channel_id": getattr(turn_context.activity.channel_id, None),
+                "service_url": getattr(turn_context.activity.service_url, None)
+            }
+        }
+        response = await self.handle_message(message)
+        await turn_context.send_activity(response.get("text", ""))
+>>>>>>> resgate-eb512f

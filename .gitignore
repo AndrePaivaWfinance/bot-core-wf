@@ -12,6 +12,10 @@ __pycache__
 env/
 venv/
 ENV/
+<<<<<<< HEAD
+=======
+.env.example
+>>>>>>> resgate-eb512f
 
 # IDE
 .vscode/

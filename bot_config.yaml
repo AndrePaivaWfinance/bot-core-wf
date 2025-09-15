@@ -5,28 +5,51 @@ bot:
   personality_template: "mesh_analyst.yaml"
 
 llm:
+<<<<<<< HEAD
   primary_llm:
     type: "azure_openai"
     endpoint: "${AZURE_OPENAI_ENDPOINT}"
     api_key: "${AZURE_OPENAI_KEY}"
     deployment_name: "gpt-4"
+=======
+  primary:
+    type: "azure_openai"
+    endpoint: ${AZURE_OPENAI_ENDPOINT}  # definido via variável de ambiente
+    api_key: ${AZURE_OPENAI_KEY}  # definido via variável de ambiente
+    deployment_name: ${AZURE_OPENAI_DEPLOYMENT}
+    model: ${AZURE_OPENAI_MODEL}
+    api_version: ${AZURE_OPENAI_API_VERSION}
+>>>>>>> resgate-eb512f
     temperature: 0.7
     max_tokens: 2000
 
   fallback_llm:
     type: "claude"
+<<<<<<< HEAD
     api_key: "${CLAUDE_API_KEY}"
+=======
+    api_key: ${CLAUDE_API_KEY}  # definido via variável de ambiente
+>>>>>>> resgate-eb512f
     model: "claude-3-sonnet-20240229"
     max_tokens: 2000
 
 cosmos:
+<<<<<<< HEAD
   endpoint: "${AZURE_COSMOS_ENDPOINT}"
   key: "${AZURE_COSMOS_KEY}"
+=======
+  endpoint: ${AZURE_COSMOS_ENDPOINT}  # definido via variável de ambiente
+  key: ${AZURE_COSMOS_KEY}  # definido via variável de ambiente
+>>>>>>> resgate-eb512f
   database: "bot_memory"
   ttl_days: 90
 
 blob_storage:
+<<<<<<< HEAD
   connection_string: "${AZURE_STORAGE_CONNECTION_STRING}"
+=======
+  connection_string: ${AZURE_STORAGE_CONNECTION_STRING}  # definido via variável de ambiente
+>>>>>>> resgate-eb512f
   container_documents: "bot-documents"
   container_media: "bot-media"
   container_logs: "bot-logs"
@@ -63,8 +86,13 @@ skills:
 interfaces:
   teams:
     enabled: true
+<<<<<<< HEAD
     app_id: "${TEAMS_APP_ID}"
     app_password: "${TEAMS_APP_PASSWORD}"
+=======
+    app_id: ${TEAMS_APP_ID}  # definido via variável de ambiente
+    app_password: ${TEAMS_APP_PASSWORD}  # definido via variável de ambiente
+>>>>>>> resgate-eb512f
   email:
     enabled: true
     smtp_server: "smtp.office365.com"
@@ -75,7 +103,11 @@ interfaces:
 monitoring:
   application_insights:
     enabled: true
+<<<<<<< HEAD
     connection_string: "${APP_INSIGHTS_CONNECTION_STRING}"
+=======
+    connection_string: ${APP_INSIGHTS_CONNECTION_STRING}  # definido via variável de ambiente
+>>>>>>> resgate-eb512f
   metrics:
     track_usage: true
     track_costs: true
