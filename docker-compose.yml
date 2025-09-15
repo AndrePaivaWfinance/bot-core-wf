@@ -1,0 +1,40 @@
+services:
+  bot:
+    build: .
+    container_name: mesh-bot
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - BOT_ENV=development
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Para desenvolvimento - alterações refletem sem rebuild
+      - ./core:/app/core
+      - ./memory:/app/memory
+      - ./skills:/app/skills
+      - ./personality:/app/personality
+      - ./config:/app/config
+      - ./utils:/app/utils
+      # Persiste cache e templates
+      - bot_cache:/app/.cache
+      - bot_templates:/app/templates
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - bot-network
+
+volumes:
+  bot_cache:
+  bot_templates:
+
+networks:
+  bot-network:
+    driver: bridge

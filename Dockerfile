@@ -15,12 +15,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-
 # Create non-root user
-RUN useradd -m -u 1000 botuser
+RUN useradd -m -u 1000 botuser && \
+    chown -R botuser:botuser /app
 
-# Create cache and templates folders with correct permissions
-RUN mkdir -p /app/.cache /app/templates && \
+# Create necessary directories
+RUN mkdir -p /app/.cache /app/templates/reports && \
     chown -R botuser:botuser /app/.cache /app/templates
 
 USER botuser
@@ -30,7 +30,12 @@ EXPOSE 8000
 
 # Set environment variables
 ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 ENV PORT=8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:8000/healthz')" || exit 1
 
 # Run the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
