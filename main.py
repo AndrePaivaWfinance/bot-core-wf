@@ -124,6 +124,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+from interfaces.teams_bot import TeamsBotInterface
+
+@app.on_event("startup")
+async def init_teams_interface():
+    logger.info("Initializing Teams interface...")
+    app.state.teams_interface = TeamsBotInterface()
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -133,8 +140,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Inclui rotas de métricas
 app.include_router(metrics_router)
+
+# Inclui o router do Teams para expor /api/messages em produção
+from interfaces import teams_interface
+app.include_router(teams_interface.router)
 
 @app.get("/")
 async def root():
