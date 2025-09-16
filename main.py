@@ -23,6 +23,7 @@ from memory.retrieval import RetrievalSystem
 from personality.personality_loader import PersonalityLoader
 from skills.skill_registry import SkillRegistry
 from utils.metrics import metrics_router
+from interfaces.bot_framework_handler import BotFrameworkHandler
 
 logger = get_logger(__name__)
 
@@ -90,6 +91,19 @@ async def lifespan(app: FastAPI):
         
         logger.info("✅ Bot Framework started successfully!")
         
+        # Inicializa Bot Framework Handler para Azure Bot Service
+        if settings.teams and settings.teams.app_id:
+            logger.info("Initializing Bot Framework handler for Azure Bot Service...")
+            app_components['bot_framework'] = BotFrameworkHandler(
+                settings=settings,
+                brain=app_components['brain']
+            )
+            # Registra as rotas do Bot Framework
+            app.include_router(app_components['bot_framework'].router)
+            logger.info("✅ Bot Framework handler initialized - /api/messages endpoint ready")
+        else:
+            logger.warning("⚠️ Teams App ID not configured - Bot Framework handler not initialized")
+        
         # Verificação de saúde do LLM
         if app_components['brain'].primary_provider:
             logger.info("✅ Primary LLM provider (Azure OpenAI) is configured")
@@ -124,13 +138,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-from interfaces.teams_bot import TeamsBotInterface
-
-@app.on_event("startup")
-async def init_teams_interface():
-    logger.info("Initializing Teams interface...")
-    app.state.teams_interface = TeamsBotInterface()
-
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -140,13 +147,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # Inclui rotas de métricas
 app.include_router(metrics_router)
-
-# Inclui o router do Teams para expor /api/messages em produção
-from interfaces import teams_interface
-app.include_router(teams_interface.router)
 
 @app.get("/")
 async def root():
@@ -158,6 +160,7 @@ async def root():
             "health": "/healthz",
             "metrics": "/metrics",
             "messages": "/v1/messages",
+            "bot_framework": "/api/messages",
             "test": "/test/message"
         }
     }
@@ -202,6 +205,13 @@ async def health_check():
     else:
         health_status["checks"]["brain"] = "❌"
     
+    # Verifica Bot Framework
+    if 'bot_framework' in app_components:
+        health_status["checks"]["bot_framework"] = "✅"
+        health_status["bot_framework_endpoint"] = "/api/messages"
+    else:
+        health_status["checks"]["bot_framework"] = "❌"
+    
     # Verifica memória
     health_status["checks"]["memory"] = "✅" if 'short_term_memory' in app_components else "❌"
     health_status["checks"]["skills"] = "✅" if 'skill_registry' in app_components else "❌"
@@ -214,81 +224,79 @@ async def health_check():
     health_status["version"] = "1.0.0"
     return health_status
 
-if os.getenv("ENV") != "production":
+@app.post("/v1/messages")
+async def handle_message(request: Dict[str, Any]):
+    """
+    Processa uma mensagem através do bot.
+    
+    Payload esperado:
+    {
+        "user_id": "string",
+        "message": "string",
+        "channel": "string" (opcional, default: "http")
+    }
+    """
+    
+    # Validação de entrada
+    user_id = request.get("user_id")
+    message = request.get("message")
+    channel = request.get("channel", "http")
+    
+    if not user_id or not message:
+        raise HTTPException(
+            status_code=400, 
+            detail="Both 'user_id' and 'message' are required"
+        )
+    
+    # Verifica se o brain está disponível
+    if 'brain' not in app_components:
+        raise HTTPException(
+            status_code=503,
+            detail="Bot brain is not initialized. Please check the logs."
+        )
+    
+    try:
+        logger.info(f"Processing message from user: {user_id}")
+        
+        # Processa a mensagem
+        response = await app_components['brain'].think(
+            user_id=user_id,
+            message=message,
+            channel=channel
+        )
+        
+        logger.info(f"Response generated successfully for user: {user_id}")
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error processing message: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    @app.post("/v1/messages")
-    async def handle_message(request: Dict[str, Any]):
-        """
-        Processa uma mensagem através do bot.
-        
-        Payload esperado:
-        {
-            "user_id": "string",
-            "message": "string",
-            "channel": "string" (opcional, default: "http")
+@app.post("/test/message")
+async def test_message():
+    """
+    Endpoint de teste para verificar se o bot está funcionando.
+    Envia uma mensagem simples e retorna a resposta.
+    """
+    
+    test_request = {
+        "user_id": "test_user",
+        "message": "Olá, qual é seu nome?",
+        "channel": "test"
+    }
+    
+    try:
+        response = await handle_message(test_request)
+        return {
+            "test": "success",
+            "request": test_request,
+            "response": response
         }
-        """
-        
-        # Validação de entrada
-        user_id = request.get("user_id")
-        message = request.get("message")
-        channel = request.get("channel", "http")
-        
-        if not user_id or not message:
-            raise HTTPException(
-                status_code=400, 
-                detail="Both 'user_id' and 'message' are required"
-            )
-        
-        # Verifica se o brain está disponível
-        if 'brain' not in app_components:
-            raise HTTPException(
-                status_code=503,
-                detail="Bot brain is not initialized. Please check the logs."
-            )
-        
-        try:
-            logger.info(f"Processing message from user: {user_id}")
-            
-            # Processa a mensagem
-            response = await app_components['brain'].think(
-                user_id=user_id,
-                message=message,
-                channel=channel
-            )
-            
-            logger.info(f"Response generated successfully for user: {user_id}")
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error processing message: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    @app.post("/test/message")
-    async def test_message():
-        """
-        Endpoint de teste para verificar se o bot está funcionando.
-        Envia uma mensagem simples e retorna a resposta.
-        """
-        
-        test_request = {
-            "user_id": "test_user",
-            "message": "Olá, qual é seu nome?",
-            "channel": "test"
+    except Exception as e:
+        return {
+            "test": "failed",
+            "error": str(e)
         }
-        
-        try:
-            response = await handle_message(test_request)
-            return {
-                "test": "success",
-                "request": test_request,
-                "response": response
-            }
-        except Exception as e:
-            return {
-                "test": "failed",
-                "error": str(e)
-            }
 
 @app.post("/v1/skills/{skill_name}")
 async def invoke_skill(skill_name: str, parameters: Dict[str, Any]):
