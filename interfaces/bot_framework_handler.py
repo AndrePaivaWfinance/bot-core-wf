@@ -2,6 +2,7 @@
 Bot Framework Handler para integração com Azure Bot Service e Teams
 """
 import json
+import os
 from typing import Dict, Any
 from fastapi import APIRouter, Request, Response, HTTPException
 from fastapi.responses import JSONResponse
@@ -20,11 +21,31 @@ class BotFrameworkHandler:
         self.router = APIRouter()
         self._setup_routes()
         
-        # Configurações do Bot Framework
-        self.app_id = settings.teams.app_id if hasattr(settings, 'teams') else None
-        self.app_password = settings.teams.app_password if hasattr(settings, 'teams') else None
+        # Configurações do Bot Framework - tenta múltiplas variáveis
+        import os
+        self.app_id = (
+            os.getenv('MICROSOFT_APP_ID') or 
+            os.getenv('TEAMS_APP_ID') or
+            (settings.teams.app_id if hasattr(settings, 'teams') else None)
+        )
+        self.app_password = (
+            os.getenv('MICROSOFT_APP_PASSWORD') or 
+            os.getenv('TEAMS_APP_PASSWORD') or
+            (settings.teams.app_password if hasattr(settings, 'teams') else None)
+        )
+        # IMPORTANTE: Pegar o tenant correto para single-tenant
+        self.tenant_id = (
+            os.getenv('MICROSOFT_APP_TENANT_ID') or
+            os.getenv('MicrosoftAppTenantId') or
+            '9ad45470-e5c8-45d9-a335-b5f311990261'  # Seu tenant específico
+        )
         
         logger.info(f"BotFrameworkHandler initialized. App ID configured: {bool(self.app_id)}")
+        logger.info(f"Using tenant: {self.tenant_id}")
+        if self.app_id:
+            logger.info(f"App ID starts with: {self.app_id[:8]}...")
+        else:
+            logger.warning("No App ID found in environment variables!")
     
     def _setup_routes(self):
         """Configura as rotas do Bot Framework"""
@@ -103,9 +124,14 @@ class BotFrameworkHandler:
                 channel='teams'
             )
             
+            logger.info(f"Bot brain response: {response.get('response', 'No response')[:100]}")
+            
             # Envia resposta de volta ao Bot Framework
             if service_url and activity.get('id'):
+                logger.info(f"Sending reply to service_url: {service_url}")
                 await self._send_reply(activity, response['response'])
+            else:
+                logger.warning(f"Cannot send reply - missing service_url or activity.id")
             
             # Retorna vazio - já enviamos a resposta diretamente
             return None
@@ -159,6 +185,12 @@ class BotFrameworkHandler:
         try:
             service_url = activity.get('serviceUrl', '').rstrip('/')
             conversation_id = activity.get('conversation', {}).get('id')
+            
+            # Se não tiver serviceUrl real, apenas loga
+            if not service_url or service_url == "https://test.com":
+                logger.info(f"Test mode - would send reply: {text[:100]}")
+                return
+            
             activity_id = activity.get('id')
             
             if not all([service_url, conversation_id, activity_id]):
@@ -187,6 +219,8 @@ class BotFrameworkHandler:
                 token = await self._get_auth_token()
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
+                else:
+                    logger.warning("Failed to get auth token, sending without authentication")
             
             # Envia a resposta
             async with httpx.AsyncClient() as client:
@@ -210,31 +244,39 @@ class BotFrameworkHandler:
         Obtém token de autenticação do Bot Framework
         """
         if not self.app_id or not self.app_password:
+            logger.warning("No app_id or app_password configured")
             return ""
         
         try:
-            # Endpoint de autenticação da Microsoft
-            auth_url = "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token"
+            # Usa o tenant específico configurado
+            tenant = self.tenant_id if hasattr(self, 'tenant_id') else '9ad45470-e5c8-45d9-a335-b5f311990261'
+            logger.info(f"Attempting auth with tenant: {tenant}, app_id: {self.app_id[:8]}...")
             
+            # URL de autenticação com tenant específico
+            auth_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+            
+            # Formato correto para Bot Framework single-tenant
             data = {
                 "grant_type": "client_credentials",
-                "client_id": self.app_id,
-                "client_secret": self.app_password,
+                "client_id": self.app_id.strip(),
+                "client_secret": self.app_password.strip(),
                 "scope": "https://api.botframework.com/.default"
             }
             
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     auth_url,
-                    data=data,
+                    data=data,  # Use data, not json
                     headers={"Content-Type": "application/x-www-form-urlencoded"}
                 )
                 
                 if response.status_code == 200:
                     token_data = response.json()
+                    logger.info("Successfully obtained auth token")
                     return token_data.get("access_token", "")
                 else:
                     logger.error(f"Failed to get auth token: {response.status_code}")
+                    logger.error(f"Response: {response.text}")
                     return ""
                     
         except Exception as e:
