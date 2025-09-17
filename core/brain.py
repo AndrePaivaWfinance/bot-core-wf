@@ -378,8 +378,18 @@ class BotBrain:
         # Calculate confidence
         confidence = self._calculate_confidence(response["text"])
         
-        # Store interaction
-        await self._store_interaction(user_id, message, response["text"], context, confidence)
+        # Store interaction WITH COSMOS DB
+        await self._store_interaction(
+            user_id, 
+            message, 
+            response["text"], 
+            {
+                **context,
+                "provider": response["provider"],
+                "channel": channel
+            }, 
+            confidence
+        )
         
         logger.info(f"✨ Response generated using {provider_used.upper()} provider")
         
@@ -445,11 +455,18 @@ class BotBrain:
             short_term_context = await self.short_term_memory.get_context(user_id)
             context.update(short_term_context)
             
-            # Long-term memory
-            long_term_context = await self.long_term_memory.retrieve(user_id, limit=5)
-            context.update({"long_term_memories": long_term_context})
+            # Long-term memory - MVP: pega histórico recente
+            if self.long_term_memory:
+                # Pegar últimas conversas do Cosmos
+                history = await self.long_term_memory.get_user_history(user_id, limit=5)
+                context["conversation_history"] = history
+                
+                # Pegar contexto do usuário se existir
+                user_context = await self.long_term_memory.get_user_context(user_id)
+                if user_context:
+                    context["user_preferences"] = user_context
             
-            # Learning context
+            # Learning context (ainda desabilitado)
             learning_context = await self.learning_system.apply_learning(user_id)
             context.update(learning_context)
             
@@ -490,9 +507,9 @@ class BotBrain:
         context: Dict[str, Any],
         confidence: float
     ):
-        """Store interaction in memory systems"""
+        """Store interaction in memory systems - MVP com Cosmos DB"""
         try:
-            # Store in short-term memory
+            # 1. Store in short-term memory (cache local)
             await self.short_term_memory.store(
                 user_id,
                 {
@@ -502,7 +519,25 @@ class BotBrain:
                 }
             )
             
-            # Learn from interaction
+            # 2. NOVO: Salvar no Cosmos DB (long-term)
+            if self.long_term_memory:
+                saved = await self.long_term_memory.save_conversation(
+                    user_id=user_id,
+                    message=message,
+                    response=response,
+                    metadata={
+                        "confidence": confidence,
+                        "provider": context.get("provider", "unknown"),
+                        "channel": context.get("channel", "http")
+                    }
+                )
+                
+                if saved:
+                    logger.info(f"💾 Conversa salva no Cosmos DB para {user_id}")
+                else:
+                    logger.debug(f"Cosmos não disponível ou erro ao salvar")
+            
+            # 3. Learn from interaction (desabilitado na Fase 4)
             await self.learning_system.learn_from_interaction(
                 user_id,
                 {
@@ -512,6 +547,7 @@ class BotBrain:
                     "confidence": confidence
                 }
             )
+            
         except Exception as e:
             logger.error(f"Error storing interaction: {str(e)}")
-            # Continue even if storage fails
+            # Continue even if storage fails - não quebra o bot
