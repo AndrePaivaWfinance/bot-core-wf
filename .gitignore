@@ -1,3 +1,5 @@
+# Limpar os conflitos que ainda existem
+cat > .gitignore << 'EOF'
 # Python
 __pycache__
 *.pyc
@@ -8,6 +10,7 @@ __pycache__
 
 # Environments
 .env
+.env.local
 .venv
 env/
 venv/
@@ -41,11 +44,7 @@ build/
 Thumbs.db
 
 # Project specific
-.env.local
-.env.production
 *.backup
-.cache/metrics/
-.cache/llm/
+.backup_conflicts/
 templates/reports/*.html
-bot_config.yaml.backup
-Makefile.backup
+EOF'
