@@ -16,10 +16,12 @@ from core.brain import BotBrain
 from core.context_engine import ContextEngine
 from core.response_builder import ResponseBuilder
 from core.router import MessageRouter
-from memory.short_term import ShortTermMemory
-from memory.long_term import LongTermMemory
+
+# NOVA ARQUITETURA - Apenas os módulos que existem
+from memory.memory_manager import MemoryManager
 from memory.learning import LearningSystem
 from memory.retrieval import RetrievalSystem
+
 from personality.personality_loader import PersonalityLoader
 from skills.skill_registry import SkillRegistry
 from utils.metrics import metrics_router
@@ -42,14 +44,12 @@ async def lifespan(app: FastAPI):
         settings = get_settings()
         app_components['settings'] = settings
         
-        # Inicializa componentes de memória
+        # Inicializa componentes de memória - NOVA ARQUITETURA APENAS
         logger.info("Initializing memory systems...")
-        app_components['short_term_memory'] = ShortTermMemory(settings)
-        app_components['long_term_memory'] = LongTermMemory(settings)
-        app_components['learning_system'] = LearningSystem(
-            settings, 
-            app_components['long_term_memory']
-        )
+        app_components['memory_manager'] = MemoryManager(settings)
+        
+        # Sistemas auxiliares
+        app_components['learning_system'] = LearningSystem(settings, None)  # Sem dependência de LongTermMemory
         app_components['retrieval_system'] = RetrievalSystem(settings)
         
         # Inicializa personalidade
@@ -68,22 +68,22 @@ async def lifespan(app: FastAPI):
             app_components['personality_loader']
         )
         
-        # Inicializa context engine
+        # Context engine simplificado (sem dependências antigas)
+        logger.info("Initializing context engine...")
         app_components['context_engine'] = ContextEngine(
             settings=settings,
-            short_term_memory=app_components['short_term_memory'],
-            long_term_memory=app_components['long_term_memory'],
+            short_term_memory=None,  # Removido
+            long_term_memory=None,   # Removido  
             learning_system=app_components['learning_system'],
             retrieval_system=app_components['retrieval_system'],
             personality_loader=app_components['personality_loader']
         )
         
-        # Inicializa o cérebro do bot
+        # Inicializa o cérebro do bot - NOVA ARQUITETURA
         logger.info("Initializing bot brain...")
         app_components['brain'] = BotBrain(
             settings=settings,
-            short_term_memory=app_components['short_term_memory'],
-            long_term_memory=app_components['long_term_memory'],
+            memory_manager=app_components['memory_manager'],  # NOVO
             learning_system=app_components['learning_system'],
             retrieval_system=app_components['retrieval_system'],
             skill_registry=app_components['skill_registry']
@@ -115,6 +115,12 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("⚠️ Fallback LLM provider is not configured")
         
+        # Verificar Memory Manager
+        memory_stats = app_components['memory_manager'].get_storage_stats()
+        logger.info(f"💾 Memory Manager Status: {memory_stats['health']}")
+        for provider, status in memory_stats['providers'].items():
+            logger.info(f"   {provider}: {'✅' if status['available'] else '❌'}")
+        
         yield
         
     except Exception as e:
@@ -127,14 +133,18 @@ async def lifespan(app: FastAPI):
     # Cleanup de recursos se necessário
     if 'brain' in app_components:
         # Fecha conexões do Claude se existir
-        if hasattr(app_components['brain'].fallback_provider, 'client'):
-            await app_components['brain'].fallback_provider.client.aclose()
+        if hasattr(app_components['brain'], 'fallback_provider') and app_components['brain'].fallback_provider:
+            if hasattr(app_components['brain'].fallback_provider, 'client'):
+                try:
+                    await app_components['brain'].fallback_provider.client.aclose()
+                except:
+                    pass  # Ignore cleanup errors
 
 # Cria a aplicação FastAPI
 app = FastAPI(
     title="Bot Framework - Mesh",
-    description="Bot Framework with Azure OpenAI integration",
-    version="1.0.0",
+    description="Bot Framework with Memory Manager Architecture",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -156,12 +166,16 @@ async def root():
     return {
         "message": "Bot Framework is running",
         "status": "online",
+        "architecture": "memory_manager",
+        "version": "2.0.0",
+        "memory": "multi-tier",
         "endpoints": {
             "health": "/healthz",
-            "metrics": "/metrics",
+            "metrics": "/metrics", 
             "messages": "/v1/messages",
             "bot_framework": "/api/messages",
-            "test": "/test/message"
+            "test": "/test/message",
+            "memory_stats": "/v1/memory/stats"
         }
     }
 
@@ -171,6 +185,8 @@ async def health_check():
     
     health_status = {
         "status": "ok",
+        "architecture": "memory_manager",
+        "version": "2.0.0",
         "checks": {}
     }
     
@@ -205,6 +221,18 @@ async def health_check():
     else:
         health_status["checks"]["brain"] = "❌"
     
+    # Verifica Memory Manager
+    if 'memory_manager' in app_components:
+        memory_stats = app_components['memory_manager'].get_storage_stats()
+        health_status["checks"]["memory_manager"] = "✅"
+        health_status["memory_health"] = memory_stats["health"]
+        health_status["memory_providers"] = {
+            provider: status["available"] 
+            for provider, status in memory_stats["providers"].items()
+        }
+    else:
+        health_status["checks"]["memory_manager"] = "❌"
+    
     # Verifica Bot Framework
     if 'bot_framework' in app_components:
         health_status["checks"]["bot_framework"] = "✅"
@@ -212,17 +240,26 @@ async def health_check():
     else:
         health_status["checks"]["bot_framework"] = "❌"
     
-    # Verifica memória
-    health_status["checks"]["memory"] = "✅" if 'short_term_memory' in app_components else "❌"
+    # Verifica skills
     health_status["checks"]["skills"] = "✅" if 'skill_registry' in app_components else "❌"
+    health_status["checks"]["learning"] = "✅" if 'learning_system' in app_components else "❌"
+    health_status["checks"]["retrieval"] = "✅" if 'retrieval_system' in app_components else "❌"
     
     # Determina status geral
-    if "❌" in health_status["checks"].values():
+    critical_checks = ["brain", "memory_manager", "settings"]
+    if any(health_status["checks"].get(check) == "❌" for check in critical_checks):
         health_status["status"] = "unhealthy"
         return health_status
     
-    health_status["version"] = "1.0.0"
     return health_status
+
+@app.get("/v1/memory/stats")
+async def memory_stats():
+    """Retorna estatísticas detalhadas de memória."""
+    if 'memory_manager' not in app_components:
+        raise HTTPException(status_code=503, detail="Memory Manager not initialized")
+    
+    return app_components['memory_manager'].get_storage_stats()
 
 @app.post("/v1/messages")
 async def handle_message(request: Dict[str, Any]):
@@ -232,7 +269,7 @@ async def handle_message(request: Dict[str, Any]):
     Payload esperado:
     {
         "user_id": "string",
-        "message": "string",
+        "message": "string", 
         "channel": "string" (opcional, default: "http")
     }
     """
@@ -276,12 +313,11 @@ async def handle_message(request: Dict[str, Any]):
 async def test_message():
     """
     Endpoint de teste para verificar se o bot está funcionando.
-    Envia uma mensagem simples e retorna a resposta.
     """
     
     test_request = {
         "user_id": "test_user",
-        "message": "Olá, qual é seu nome?",
+        "message": "Olá Mesh, como você está funcionando?",
         "channel": "test"
     }
     
@@ -289,6 +325,7 @@ async def test_message():
         response = await handle_message(test_request)
         return {
             "test": "success",
+            "architecture": "memory_manager",
             "request": test_request,
             "response": response
         }

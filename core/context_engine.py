@@ -1,7 +1,5 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from config.settings import Settings
-from memory.short_term import ShortTermMemory
-from memory.long_term import LongTermMemory
 from memory.learning import LearningSystem
 from memory.retrieval import RetrievalSystem
 from personality.personality_loader import PersonalityLoader
@@ -10,47 +8,59 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 class ContextEngine:
+    """
+    Context Engine - Atualizado para nova arquitetura
+    Removidas dependências de short_term e long_term memory
+    """
+    
     def __init__(
         self,
         settings: Settings,
-        short_term_memory: ShortTermMemory,
-        long_term_memory: LongTermMemory,
+        short_term_memory: Optional[Any],  # DEPRECATED - pode ser None
+        long_term_memory: Optional[Any],   # DEPRECATED - pode ser None
         learning_system: LearningSystem,
         retrieval_system: RetrievalSystem,
         personality_loader: PersonalityLoader
     ):
         self.settings = settings
-        self.short_term_memory = short_term_memory
-        self.long_term_memory = long_term_memory
         self.learning_system = learning_system
         self.retrieval_system = retrieval_system
         self.personality_loader = personality_loader
+        
+        # Log sobre dependências deprecated
+        if short_term_memory is None and long_term_memory is None:
+            logger.info("✅ ContextEngine initialized with new architecture (no legacy memory)")
+        else:
+            logger.warning("⚠️ ContextEngine still using legacy memory components")
     
     async def build_context(self, user_id: str, message: str) -> Dict[str, Any]:
-        """Build comprehensive context for the LLM"""
+        """Build comprehensive context - NOVA ARQUITETURA"""
         context = {}
         
         # Add personality context
-        personality_context = await self.personality_loader.get_personality_context()
-        context.update(personality_context)
-        
-        # Add short-term memory context
-        short_term_context = await self.short_term_memory.get_context(user_id)
-        context.update(short_term_context)
-        
-        # Add long-term memory context
-        if self.settings.memory.long_term.enabled:
-            long_term_context = await self.long_term_memory.retrieve_relevant_memories(user_id, message)
-            context.update({"long_term_memories": long_term_context})
+        try:
+            personality_context = await self.personality_loader.get_personality_context()
+            context.update(personality_context)
+            logger.debug("✅ Personality context added")
+        except Exception as e:
+            logger.error(f"Failed to load personality: {str(e)}")
         
         # Add learning context
-        if self.settings.memory.learning.enabled:
-            learning_context = await self.learning_system.apply_learning(user_id)
-            context.update(learning_context)
+        if self.settings.memory.learning.get("enabled", False):
+            try:
+                learning_context = await self.learning_system.apply_learning(user_id)
+                context.update(learning_context)
+                logger.debug("✅ Learning context added")
+            except Exception as e:
+                logger.debug(f"Learning context not available: {str(e)}")
         
         # Add retrieval context (RAG)
-        retrieval_context = await self.retrieval_system.retrieve_relevant_documents(message)
-        context.update({"retrieved_documents": retrieval_context})
+        try:
+            retrieval_context = await self.retrieval_system.retrieve_relevant_documents(message)
+            context.update({"retrieved_documents": retrieval_context})
+            logger.debug(f"✅ Retrieved {len(retrieval_context)} documents")
+        except Exception as e:
+            logger.debug(f"Retrieval context not available: {str(e)}")
         
         # Add current message
         context.update({

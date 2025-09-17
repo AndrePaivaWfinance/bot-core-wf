@@ -1,6 +1,6 @@
 """
 Bot Brain - Orchestrator Principal
-Versão refatorada e modular
+Versão completamente migrada para MemoryManager
 """
 from typing import Dict, Any, Optional, List
 import json
@@ -8,8 +8,6 @@ import json
 from config.settings import Settings
 from core.llm import create_provider, LLMProvider
 from memory.memory_manager import MemoryManager
-from memory.short_term import ShortTermMemory
-from memory.long_term import LongTermMemory
 from memory.learning import LearningSystem
 from memory.retrieval import RetrievalSystem
 from skills.skill_registry import SkillRegistry
@@ -20,28 +18,23 @@ logger = get_logger(__name__)
 
 class BotBrain:
     """
-    Orchestrador central do bot
-    Coordena LLMs, memória, skills e contexto
+    Orchestrador central do bot - NOVA ARQUITETURA
+    Usa apenas MemoryManager (sem short_term/long_term)
     """
     
     def __init__(
         self,
         settings: Settings,
-        short_term_memory: ShortTermMemory,
-        long_term_memory: LongTermMemory,
+        memory_manager: MemoryManager,
         learning_system: LearningSystem,
         retrieval_system: RetrievalSystem,
         skill_registry: SkillRegistry
     ):
         self.settings = settings
-        self.short_term_memory = short_term_memory
-        self.long_term_memory = long_term_memory
+        self.memory_manager = memory_manager
         self.learning_system = learning_system
         self.retrieval_system = retrieval_system
         self.skill_registry = skill_registry
-        
-        # Memory Manager (NEW)
-        self.memory_manager = MemoryManager(settings)
         
         # Initialize LLM providers
         self.primary_provider = None
@@ -149,7 +142,7 @@ class BotBrain:
     @record_metrics
     async def think(self, user_id: str, message: str, channel: str = "http") -> Dict[str, Any]:
         """
-        Process a message and generate response
+        Process a message and generate response - NOVA ARQUITETURA
         
         Args:
             user_id: User identifier
@@ -170,7 +163,7 @@ class BotBrain:
         # Calculate confidence
         confidence = self._calculate_confidence(response["text"])
         
-        # Store interaction in memory
+        # Store interaction in memory - USA APENAS MEMORY MANAGER
         await self._store_interaction(
             user_id, 
             message, 
@@ -178,9 +171,9 @@ class BotBrain:
             {
                 **context,
                 "provider": response["provider"],
-                "channel": channel
-            }, 
-            confidence
+                "channel": channel,
+                "confidence": confidence
+            }
         )
         
         logger.info(f"✨ Response generated using {response['provider']}")
@@ -193,7 +186,8 @@ class BotBrain:
                 "confidence": confidence,
                 "usage": response.get("usage", {}),
                 "context_used": list(context.keys()),
-                "attempts": response.get("attempts", [])
+                "attempts": response.get("attempts", []),
+                "architecture": "memory_manager"
             }
         }
     
@@ -236,30 +230,39 @@ class BotBrain:
         return response
     
     async def _build_context(self, user_id: str, message: str) -> Dict[str, Any]:
-        """Build context from memory systems"""
+        """Build context from memory systems - NOVA ARQUITETURA"""
         context = {}
         
         try:
-            # Get from Memory Manager (NEW)
+            # PRINCIPAL: Memory Manager
             if self.memory_manager:
+                # Histórico de conversas
                 history = await self.memory_manager.get_conversation_history(user_id, limit=5)
                 context["conversation_history"] = history
                 
+                # Contexto do usuário
                 user_context = await self.memory_manager.get_user_context(user_id)
                 if user_context:
                     context["user_preferences"] = user_context
+                
+                logger.debug(f"💾 Loaded {len(history)} conversations from MemoryManager")
             
-            # Short-term memory (legacy support)
-            short_term = await self.short_term_memory.get_context(user_id)
-            context.update(short_term)
-            
-            # Learning context
-            learning = await self.learning_system.apply_learning(user_id)
-            context.update(learning)
+            # Learning context (se aplicável)
+            if self.learning_system:
+                try:
+                    learning = await self.learning_system.apply_learning(user_id)
+                    context.update(learning)
+                except Exception as e:
+                    logger.debug(f"Learning system not available: {str(e)}")
             
             # Retrieval context (RAG)
-            retrieval = await self.retrieval_system.retrieve_relevant_documents(message)
-            context["retrieved_documents"] = retrieval
+            if self.retrieval_system:
+                try:
+                    retrieval = await self.retrieval_system.retrieve_relevant_documents(message)
+                    context["retrieved_documents"] = retrieval
+                    logger.debug(f"📚 Retrieved {len(retrieval)} documents")
+                except Exception as e:
+                    logger.debug(f"Retrieval system error: {str(e)}")
             
         except Exception as e:
             logger.error(f"Error building context: {str(e)}")
@@ -271,45 +274,38 @@ class BotBrain:
         user_id: str,
         message: str,
         response: str,
-        context: Dict[str, Any],
-        confidence: float
+        context: Dict[str, Any]
     ):
-        """Store interaction in memory systems"""
+        """Store interaction in memory - USA APENAS MEMORY MANAGER"""
         try:
-            # Store in Memory Manager (NEW)
+            # Armazenar via Memory Manager
             if self.memory_manager:
                 await self.memory_manager.save_conversation(
                     user_id=user_id,
                     message=message,
                     response=response,
                     metadata={
-                        "confidence": confidence,
+                        "confidence": context.get("confidence", 0.7),
                         "provider": context.get("provider", "unknown"),
                         "channel": context.get("channel", "http")
                     }
                 )
-                logger.info(f"💾 Conversation saved via Memory Manager")
+                logger.debug(f"💾 Conversation saved via Memory Manager")
             
-            # Legacy storage (for compatibility)
-            await self.short_term_memory.store(
-                user_id,
-                {
-                    "message": message,
-                    "response": response,
-                    "confidence": confidence
-                }
-            )
-            
-            # Learning system (Phase 4)
-            await self.learning_system.learn_from_interaction(
-                user_id,
-                {
-                    "input": message,
-                    "output": response,
-                    "context": context,
-                    "confidence": confidence
-                }
-            )
+            # Learning system (Fase 4 - futuro)
+            if self.learning_system:
+                try:
+                    await self.learning_system.learn_from_interaction(
+                        user_id,
+                        {
+                            "input": message,
+                            "output": response,
+                            "context": context,
+                            "confidence": context.get("confidence", 0.7)
+                        }
+                    )
+                except Exception as e:
+                    logger.debug(f"Learning system not active: {str(e)}")
             
         except Exception as e:
             logger.error(f"Error storing interaction: {str(e)}")
@@ -332,3 +328,15 @@ class BotBrain:
         
         # Ensure confidence is between 0 and 1
         return max(0.1, min(0.99, confidence))
+    
+    def get_memory_stats(self) -> Dict[str, Any]:
+        """Retorna estatísticas de memória"""
+        if self.memory_manager:
+            return self.memory_manager.get_storage_stats()
+        return {"status": "no_memory_manager"}
+    
+    async def get_user_history(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Recupera histórico do usuário via Memory Manager"""
+        if self.memory_manager:
+            return await self.memory_manager.get_conversation_history(user_id, limit)
+        return []
