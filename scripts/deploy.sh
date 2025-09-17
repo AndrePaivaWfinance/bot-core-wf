@@ -16,7 +16,7 @@ WEBAPP_NAME="meshbrain"
 RESOURCE_GROUP="rg-wf-ia-gpt41"
 
 # Versão
-VERSION=1.2.8
+VERSION=1.2.10
 FULL_IMAGE="$ACR_NAME.azurecr.io/$IMAGE_NAME:$VERSION"
 
 echo -e "${GREEN}🚀 Deploy do Bot Framework - v$VERSION${NC}"
