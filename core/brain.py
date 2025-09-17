@@ -34,23 +34,29 @@ class AzureOpenAIProvider(LLMProvider):
         if not config.get("api_key") or not config.get("endpoint") or not config.get("deployment_name"):
             raise ValueError(f"Azure OpenAI requires api_key, endpoint, and deployment_name. Got: {config.keys()}")
         
+        # Validação adicional da API key
+        api_key = config["api_key"]
+        if len(api_key) < 10:  # API keys são normalmente bem maiores
+            logger.warning(f"⚠️ API key seems too short: {len(api_key)} chars")
+        
         # Use AsyncAzureOpenAI for Azure endpoints
         self.client = AsyncAzureOpenAI(
-            api_key=config["api_key"],
+            api_key=api_key,
             api_version=config.get("api_version", "2024-02-01"),
             azure_endpoint=config['endpoint'].rstrip('/'),  # Remove trailing slash
             azure_deployment=config['deployment_name']
         )
         
-        logger.info(f"AzureOpenAIProvider initialized successfully with endpoint={config['endpoint']}, "
+        logger.info(f"AzureOpenAIProvider initialized with endpoint={config['endpoint']}, "
                    f"deployment={config['deployment_name']}, "
                    f"api_version={config.get('api_version', '2024-02-01')}")
     
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=10))  # Reduzido para 2 tentativas
     async def generate(self, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            logger.debug(f"Calling Azure OpenAI with deployment={self.config['deployment_name']}")
-            logger.debug(f"Prompt: {prompt[:100]}...")  # Log first 100 chars of prompt
+            logger.info(f"🔷 Azure OpenAI: Attempting to generate response...")
+            logger.debug(f"Deployment: {self.config['deployment_name']}")
+            logger.debug(f"Prompt preview: {prompt[:100]}...")
             
             response = await self.client.chat.completions.create(
                 model=self.config["deployment_name"],  # Azure uses deployment name as model
@@ -62,7 +68,7 @@ class AzureOpenAIProvider(LLMProvider):
                 max_tokens=self.config.get("max_tokens", 2000)
             )
             
-            logger.debug(f"Azure OpenAI response received successfully")
+            logger.info(f"✅ Azure OpenAI: Response received successfully")
             
             return {
                 "text": response.choices[0].message.content,
@@ -72,8 +78,18 @@ class AzureOpenAIProvider(LLMProvider):
             
         except Exception as e:
             import traceback
-            logger.error(f"Azure OpenAI error: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            error_msg = str(e)
+            logger.error(f"❌ Azure OpenAI error: {error_msg}")
+            
+            # Log específico para erros de autenticação
+            if "401" in error_msg or "authentication" in error_msg.lower() or "unauthorized" in error_msg.lower():
+                logger.error(f"🔐 Authentication failed - check your Azure OpenAI API key")
+            elif "404" in error_msg:
+                logger.error(f"🔍 Deployment not found - check deployment name: {self.config['deployment_name']}")
+            elif "429" in error_msg:
+                logger.error(f"⚠️ Rate limit exceeded")
+            
+            logger.debug(f"Traceback: {traceback.format_exc()}")
             raise
     
     async def get_embedding(self, text: str) -> list:
@@ -98,7 +114,7 @@ class AzureOpenAIProvider(LLMProvider):
 class ClaudeProvider(LLMProvider):
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.client = httpx.AsyncClient(timeout=60.0)  # Increase timeout
+        self.client = httpx.AsyncClient(timeout=60.0)
         
         # Validate API key
         if not config.get("api_key"):
@@ -106,13 +122,15 @@ class ClaudeProvider(LLMProvider):
         
         logger.info(f"ClaudeProvider initialized with model={config.get('model', 'claude-3-sonnet-20240229')}")
     
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=10))  # Reduzido para 2 tentativas
     async def generate(self, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            logger.info(f"🟣 Claude: Attempting to generate response...")
+            
             headers = {
                 "Content-Type": "application/json",
                 "x-api-key": self.config["api_key"],
-                "anthropic-version": "2023-06-01"  # Use stable version
+                "anthropic-version": "2023-06-01"
             }
             
             payload = {
@@ -123,9 +141,7 @@ class ClaudeProvider(LLMProvider):
                 ]
             }
             
-            logger.debug(f"Calling Claude API with model={payload['model']}")
-            logger.debug(f"Request headers: {headers}")
-            logger.debug(f"Request payload: {json.dumps(payload, indent=2)}")
+            logger.debug(f"Claude model: {payload['model']}")
             
             response = await self.client.post(
                 "https://api.anthropic.com/v1/messages",
@@ -133,15 +149,17 @@ class ClaudeProvider(LLMProvider):
                 json=payload
             )
             
-            # Log response details before checking status
+            # Log response details
             logger.debug(f"Claude response status: {response.status_code}")
+            
             if response.status_code != 200:
-                logger.error(f"Claude error response: {response.text}")
+                logger.error(f"❌ Claude API error: Status {response.status_code}")
+                logger.error(f"Response: {response.text}")
             
             response.raise_for_status()
             result = response.json()
             
-            logger.debug(f"Claude response received successfully")
+            logger.info(f"✅ Claude: Response received successfully")
             
             return {
                 "text": result["content"][0]["text"],
@@ -150,12 +168,12 @@ class ClaudeProvider(LLMProvider):
             }
             
         except httpx.HTTPStatusError as e:
-            logger.error(f"Claude HTTP error: {e.response.status_code}")
+            logger.error(f"❌ Claude HTTP error: {e.response.status_code}")
             logger.error(f"Claude error response: {e.response.text}")
             raise
         except Exception as e:
             import traceback
-            logger.error(f"Claude error: {str(e)}")
+            logger.error(f"❌ Claude error: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
     
@@ -190,32 +208,25 @@ class BotBrain:
         self.primary_provider = None
         self.fallback_provider = None
         
-        # Log the structure of settings for debugging
-        logger.debug(f"BotBrain init - type(settings): {type(settings)}")
-        logger.debug(f"BotBrain init - hasattr(settings, 'llm'): {hasattr(settings, 'llm')}")
+        logger.info("=" * 60)
+        logger.info("🧠 Initializing Bot Brain...")
+        logger.info("=" * 60)
         
         # Initialize primary provider (Azure OpenAI)
         if hasattr(settings, 'llm') and settings.llm:
             llm_config = settings.llm
-            logger.debug(f"BotBrain init - type(llm_config): {type(llm_config)}")
             
             # Try to get primary config
             primary_config = None
             
-            # Handle ConfigNS or similar object
             if hasattr(llm_config, 'primary'):
                 primary_config = llm_config.primary
-                logger.debug(f"Found llm_config.primary")
             elif hasattr(llm_config, 'primary_llm'):
                 primary_config = llm_config.primary_llm
-                logger.debug(f"Found llm_config.primary_llm")
             elif isinstance(llm_config, dict):
                 primary_config = llm_config.get('primary') or llm_config.get('primary_llm')
-                logger.debug(f"Found primary config in dict")
             
             if primary_config:
-                logger.debug(f"Primary config type: {type(primary_config)}")
-                
                 # Convert to dict if needed
                 config_dict = None
                 if hasattr(primary_config, '__dict__'):
@@ -225,7 +236,6 @@ class BotBrain:
                 elif isinstance(primary_config, dict):
                     config_dict = primary_config
                 else:
-                    # Try to access attributes directly
                     config_dict = {
                         'type': getattr(primary_config, 'type', None),
                         'endpoint': getattr(primary_config, 'endpoint', None),
@@ -236,31 +246,24 @@ class BotBrain:
                         'api_version': getattr(primary_config, 'api_version', '2024-02-01')
                     }
                 
-                logger.debug(f"Primary config dict: {config_dict}")
-                
                 if config_dict and config_dict.get('type') == 'azure_openai':
                     try:
                         self.primary_provider = AzureOpenAIProvider(config_dict)
-                        logger.info("Primary provider (Azure OpenAI) initialized successfully")
+                        logger.info("✅ Primary provider (Azure OpenAI) initialized successfully")
                     except Exception as e:
-                        logger.error(f"Failed to initialize Azure OpenAI: {str(e)}")
+                        logger.error(f"❌ Failed to initialize Azure OpenAI: {str(e)}")
             
             # Try to get fallback config
             fallback_config = None
             
             if hasattr(llm_config, 'fallback'):
                 fallback_config = llm_config.fallback
-                logger.debug(f"Found llm_config.fallback")
             elif hasattr(llm_config, 'fallback_llm'):
                 fallback_config = llm_config.fallback_llm
-                logger.debug(f"Found llm_config.fallback_llm")
             elif isinstance(llm_config, dict):
                 fallback_config = llm_config.get('fallback') or llm_config.get('fallback_llm')
-                logger.debug(f"Found fallback config in dict")
             
             if fallback_config:
-                logger.debug(f"Fallback config type: {type(fallback_config)}")
-                
                 # Convert to dict if needed
                 config_dict = None
                 if hasattr(fallback_config, '__dict__'):
@@ -270,7 +273,6 @@ class BotBrain:
                 elif isinstance(fallback_config, dict):
                     config_dict = fallback_config
                 else:
-                    # Try to access attributes directly
                     config_dict = {
                         'type': getattr(fallback_config, 'type', None),
                         'api_key': getattr(fallback_config, 'api_key', None),
@@ -279,17 +281,24 @@ class BotBrain:
                         'max_tokens': getattr(fallback_config, 'max_tokens', 2000)
                     }
                 
-                logger.debug(f"Fallback config dict: {config_dict}")
-                
                 if config_dict and config_dict.get('type') == 'claude':
                     try:
                         self.fallback_provider = ClaudeProvider(config_dict)
-                        logger.info("Fallback provider (Claude) initialized successfully")
+                        logger.info("✅ Fallback provider (Claude) initialized successfully")
                     except Exception as e:
-                        logger.error(f"Failed to initialize Claude: {str(e)}")
+                        logger.error(f"❌ Failed to initialize Claude: {str(e)}")
         
+        # Log final status
+        logger.info("=" * 60)
         if not self.primary_provider and not self.fallback_provider:
-            logger.warning("No LLM providers configured! Check your configuration.")
+            logger.error("⚠️ WARNING: No LLM providers configured! Bot will not work!")
+        elif not self.primary_provider:
+            logger.warning("⚠️ Primary provider not configured, using only fallback")
+        elif not self.fallback_provider:
+            logger.warning("⚠️ Fallback provider not configured, no redundancy available")
+        else:
+            logger.info("✅ Both primary and fallback providers are ready!")
+        logger.info("=" * 60)
     
     @record_metrics
     async def think(self, user_id: str, message: str, channel: str = "http") -> Dict[str, Any]:
@@ -297,39 +306,51 @@ class BotBrain:
         if getattr(self.settings, "mock_mode", False):
             return await self._handle_mock_mode(user_id, message)
         
+        logger.info(f"🤔 Processing message from {user_id}: {message[:50]}...")
+        
         # Build context
         context = await self._build_context(user_id, message)
         
         # Generate response with primary provider, fallback if needed
         response = None
         provider_used = "none"
+        attempts = []
         
         # Try primary provider
         if self.primary_provider:
             try:
-                logger.info("Attempting to use primary provider (Azure OpenAI)")
+                logger.info("📡 Attempting PRIMARY provider (Azure OpenAI)...")
                 response = await self.primary_provider.generate(message, context)
                 provider_used = "primary"
-                logger.info(f"Primary provider responded successfully")
+                logger.info(f"✅ Primary provider succeeded!")
+                attempts.append({"provider": "azure_openai", "status": "success"})
             except Exception as e:
-                logger.error(f"Primary provider failed: {str(e)}")
-                logger.exception("Primary provider exception details:")
+                error_msg = str(e)
+                logger.error(f"❌ Primary provider failed: {error_msg[:200]}")
+                attempts.append({"provider": "azure_openai", "status": "failed", "error": error_msg[:100]})
+                
+                # Se o erro for de autenticação, loga mais detalhes
+                if "401" in error_msg or "authentication" in error_msg.lower():
+                    logger.error("🔐 Azure OpenAI authentication failed - will try fallback")
         
         # Try fallback provider if primary failed
         if not response and self.fallback_provider:
             try:
-                logger.info("Primary provider failed, attempting fallback provider (Claude)")
+                logger.info("📡 Primary failed, attempting FALLBACK provider (Claude)...")
                 response = await self.fallback_provider.generate(message, context)
                 provider_used = "fallback"
-                logger.info(f"Fallback provider responded successfully")
+                logger.info(f"✅ Fallback provider succeeded!")
+                attempts.append({"provider": "claude", "status": "success"})
             except Exception as e:
-                logger.error(f"Fallback provider also failed: {str(e)}")
-                logger.exception("Fallback provider exception details:")
+                error_msg = str(e)
+                logger.error(f"❌ Fallback provider also failed: {error_msg[:200]}")
+                attempts.append({"provider": "claude", "status": "failed", "error": error_msg[:100]})
         
         # If all providers failed, raise error
         if not response:
             error_msg = "All LLM providers failed. Please check your configuration and API keys."
-            logger.error(error_msg)
+            logger.error(f"💀 {error_msg}")
+            logger.error(f"Attempts made: {json.dumps(attempts, indent=2)}")
             raise RuntimeError(error_msg)
         
         # Calculate confidence
@@ -338,7 +359,7 @@ class BotBrain:
         # Store interaction
         await self._store_interaction(user_id, message, response["text"], context, confidence)
         
-        logger.info(f"Response generated successfully using {provider_used} provider")
+        logger.info(f"✨ Response generated using {provider_used.upper()} provider")
         
         return {
             "response": response["text"],
@@ -347,7 +368,8 @@ class BotBrain:
                 "provider_used": provider_used,
                 "confidence": confidence,
                 "usage": response.get("usage", {}),
-                "context_used": list(context.keys())
+                "context_used": list(context.keys()),
+                "attempts": attempts  # Incluindo informações sobre as tentativas
             }
         }
     

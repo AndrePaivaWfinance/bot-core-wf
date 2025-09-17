@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # ==== Config ==========================
 APP            ?= meshcore
 RG             ?= rg-wf-ia-gpt41
@@ -16,11 +15,11 @@ PY             ?= python
 help:
 	@echo "Targets:"
 	@echo "  dev            - roda Uvicorn local com reload"
-	@echo "  lint           - lint (ruff) e formatação (black)"
-	@echo "  test           - testes (placeholder)"
+	@echo "  test           - roda testes"
 	@echo "  docker         - build local da imagem"
 	@echo "  run            - roda o container local"
 	@echo "  stop           - para o container local"
+	@echo "  clean          - limpa arquivos temporários"
 	@echo "  acr-login      - login no ACR"
 	@echo "  push           - push da imagem pro ACR"
 	@echo "  deploy         - cria/atualiza WebApp apontando pra imagem"
@@ -33,15 +32,9 @@ help:
 dev:
 	$(PY) -m uvicorn main:app --host 0.0.0.0 --port $(PORT) --reload
 
-.PHONY: lint
-lint:
-	@$(PY) -m pip install -q ruff black
-	ruff check .
-	black --check .
-
 .PHONY: test
 test:
-	@echo "Sem testes configurados ainda. OK."
+	pytest -v
 
 # ==== Docker ==========================
 .PHONY: docker
@@ -55,6 +48,12 @@ run:
 .PHONY: stop
 stop:
 	- docker stop $(IMAGE_NAME)
+
+.PHONY: clean
+clean:
+	find . -name "*.pyc" -delete
+	find . -name "__pycache__" -delete
+	rm -rf .cache
 
 # ==== ACR / Azure =====================
 .PHONY: acr-login
@@ -92,21 +91,3 @@ logs:
 .PHONY: open
 open:
 	@start "" https://$(APP).azurewebsites.net/ || xdg-open https://$(APP).azurewebsites.net/ || open https://$(APP).azurewebsites.net/
-=======
-.PHONY: run test docker clean
-
-run:
-	uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
-test:
-	pytest -v
-
-docker:
-	docker build -t bot-framework .
-	docker run -p 8000:8000 bot-framework
-
-clean:
-	find . -name "*.pyc" -delete
-	find . -name "__pycache__" -delete
-	rm -rf .cache
->>>>>>> resgate-eb512f

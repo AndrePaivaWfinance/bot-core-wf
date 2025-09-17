@@ -12,10 +12,6 @@ __pycache__
 env/
 venv/
 ENV/
-<<<<<<< HEAD
-=======
-.env.example
->>>>>>> resgate-eb512f
 
 # IDE
 .vscode/
@@ -43,3 +39,13 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Project specific
+.env.local
+.env.production
+*.backup
+.cache/metrics/
+.cache/llm/
+templates/reports/*.html
+bot_config.yaml.backup
+Makefile.backup
