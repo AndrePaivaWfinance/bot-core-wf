@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
-from openai import AsyncAzureOpenAI, AsyncOpenAI
-import httpx
+from openai import AsyncAzureOpenAI
+import anthropic
+import os
 from tenacity import retry, stop_after_attempt, wait_exponential
-import numpy as np
 import json
+import asyncio
 
 from config.settings import Settings
 from memory.short_term import ShortTermMemory
@@ -51,7 +52,7 @@ class AzureOpenAIProvider(LLMProvider):
                    f"deployment={config['deployment_name']}, "
                    f"api_version={config.get('api_version', '2024-02-01')}")
     
-    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=10))  # Reduzido para 2 tentativas
+    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def generate(self, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
         try:
             logger.info(f"🔷 Azure OpenAI: Attempting to generate response...")
@@ -114,78 +115,100 @@ class AzureOpenAIProvider(LLMProvider):
 class ClaudeProvider(LLMProvider):
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.client = httpx.AsyncClient(timeout=60.0)
         
-        # Validate API key
-        if not config.get("api_key"):
-            raise ValueError("Claude requires api_key")
+        # Pega a API key - tenta várias fontes
+        api_key = (
+            config.get("api_key") or 
+            os.getenv("ANTHROPIC_API_KEY") or 
+            os.getenv("CLAUDE_API_KEY")
+        )
         
-        logger.info(f"ClaudeProvider initialized with model={config.get('model', 'claude-3-sonnet-20240229')}")
+        if not api_key:
+            raise ValueError("Claude requires api_key in config or ANTHROPIC_API_KEY environment variable")
+        
+        # USA O SDK OFICIAL DO ANTHROPIC
+        self.client = anthropic.Anthropic(api_key=api_key)
+        
+        # Pega o modelo da config ou usa o padrão
+        self.model = config.get('model', 'claude-opus-4-1-20250805')
+        
+        logger.info(f"✅ ClaudeProvider initialized with model={self.model}")
+        logger.info(f"   API key configured: {'Yes' if api_key else 'No'}")
     
-    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=10))  # Reduzido para 2 tentativas
+    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def generate(self, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
         try:
             logger.info(f"🟣 Claude: Attempting to generate response...")
+            logger.debug(f"Model: {self.model}")
+            logger.debug(f"Prompt preview: {prompt[:100]}...")
             
-            headers = {
-                "Content-Type": "application/json",
-                "x-api-key": self.config["api_key"],
-                "anthropic-version": "2023-06-01"
-            }
+            # Como o SDK anthropic não tem versão async ainda, 
+            # usamos run_in_executor para não bloquear
+            loop = asyncio.get_event_loop()
             
-            payload = {
-                "model": self.config.get("model", "claude-3-sonnet-20240229"),
-                "max_tokens": self.config.get("max_tokens", 2000),
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ]
-            }
+            def create_message():
+                return self.client.messages.create(
+                    model=self.model,
+                    max_tokens=self.config.get("max_tokens", 2000),
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ]
+                )
             
-            logger.debug(f"Claude model: {payload['model']}")
-            
-            response = await self.client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers,
-                json=payload
-            )
-            
-            # Log response details
-            logger.debug(f"Claude response status: {response.status_code}")
-            
-            if response.status_code != 200:
-                logger.error(f"❌ Claude API error: Status {response.status_code}")
-                logger.error(f"Response: {response.text}")
-            
-            response.raise_for_status()
-            result = response.json()
+            # Executa em thread separada para não bloquear
+            message = await loop.run_in_executor(None, create_message)
             
             logger.info(f"✅ Claude: Response received successfully")
             
+            # Extrai o texto da resposta
+            response_text = ""
+            if hasattr(message, 'content'):
+                if isinstance(message.content, list) and len(message.content) > 0:
+                    # content é uma lista de ContentBlock
+                    content_block = message.content[0]
+                    if hasattr(content_block, 'text'):
+                        response_text = content_block.text
+                    else:
+                        response_text = str(content_block)
+                elif isinstance(message.content, str):
+                    response_text = message.content
+                else:
+                    response_text = str(message.content)
+            
+            # Extrai informações de uso se disponível
+            usage = {}
+            if hasattr(message, 'usage'):
+                usage = {
+                    "input_tokens": getattr(message.usage, 'input_tokens', 0),
+                    "output_tokens": getattr(message.usage, 'output_tokens', 0),
+                    "total_tokens": getattr(message.usage, 'input_tokens', 0) + getattr(message.usage, 'output_tokens', 0)
+                }
+            
             return {
-                "text": result["content"][0]["text"],
-                "usage": result.get("usage", {}),
+                "text": response_text,
+                "usage": usage,
                 "provider": "claude"
             }
             
-        except httpx.HTTPStatusError as e:
-            logger.error(f"❌ Claude HTTP error: {e.response.status_code}")
-            logger.error(f"Claude error response: {e.response.text}")
-            raise
         except Exception as e:
             import traceback
-            logger.error(f"❌ Claude error: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            error_msg = str(e)
+            logger.error(f"❌ Claude error: {error_msg}")
+            
+            # Log específico para tipos de erro
+            if "api_key" in error_msg.lower():
+                logger.error("🔐 API key issue - check ANTHROPIC_API_KEY")
+            elif "model_not_found" in error_msg.lower():
+                logger.error(f"🔍 Model not found: {self.model}")
+            elif "rate" in error_msg.lower():
+                logger.error("⚠️ Rate limit issue")
+                
+            logger.debug(f"Traceback: {traceback.format_exc()}")
             raise
     
     async def get_embedding(self, text: str) -> list:
-        # Claude doesn't provide embedding API
+        # Claude não oferece API de embeddings
         raise NotImplementedError("Claude provider doesn't support embeddings")
-    
-    async def __aenter__(self):
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.client.aclose()
 
 class BotBrain:
     def __init__(
@@ -227,24 +250,12 @@ class BotBrain:
                 primary_config = llm_config.get('primary') or llm_config.get('primary_llm')
             
             if primary_config:
+                logger.debug(f"Primary config type: {type(primary_config)}")
+                
                 # Convert to dict if needed
-                config_dict = None
-                if hasattr(primary_config, '__dict__'):
-                    config_dict = vars(primary_config)
-                elif hasattr(primary_config, 'dict'):
-                    config_dict = primary_config.dict()
-                elif isinstance(primary_config, dict):
-                    config_dict = primary_config
-                else:
-                    config_dict = {
-                        'type': getattr(primary_config, 'type', None),
-                        'endpoint': getattr(primary_config, 'endpoint', None),
-                        'api_key': getattr(primary_config, 'api_key', None),
-                        'deployment_name': getattr(primary_config, 'deployment_name', None),
-                        'temperature': getattr(primary_config, 'temperature', 0.7),
-                        'max_tokens': getattr(primary_config, 'max_tokens', 2000),
-                        'api_version': getattr(primary_config, 'api_version', '2024-02-01')
-                    }
+                config_dict = self._config_to_dict(primary_config)
+                
+                logger.debug(f"Primary config dict: {config_dict}")
                 
                 if config_dict and config_dict.get('type') == 'azure_openai':
                     try:
@@ -264,22 +275,12 @@ class BotBrain:
                 fallback_config = llm_config.get('fallback') or llm_config.get('fallback_llm')
             
             if fallback_config:
+                logger.debug(f"Fallback config type: {type(fallback_config)}")
+                
                 # Convert to dict if needed
-                config_dict = None
-                if hasattr(fallback_config, '__dict__'):
-                    config_dict = vars(fallback_config)
-                elif hasattr(fallback_config, 'dict'):
-                    config_dict = fallback_config.dict()
-                elif isinstance(fallback_config, dict):
-                    config_dict = fallback_config
-                else:
-                    config_dict = {
-                        'type': getattr(fallback_config, 'type', None),
-                        'api_key': getattr(fallback_config, 'api_key', None),
-                        'model': getattr(fallback_config, 'model', 'claude-3-sonnet-20240229'),
-                        'temperature': getattr(fallback_config, 'temperature', 0.7),
-                        'max_tokens': getattr(fallback_config, 'max_tokens', 2000)
-                    }
+                config_dict = self._config_to_dict(fallback_config)
+                
+                logger.debug(f"Fallback config dict: {config_dict}")
                 
                 if config_dict and config_dict.get('type') == 'claude':
                     try:
@@ -299,6 +300,27 @@ class BotBrain:
         else:
             logger.info("✅ Both primary and fallback providers are ready!")
         logger.info("=" * 60)
+    
+    def _config_to_dict(self, config) -> dict:
+        """Convert config object to dictionary"""
+        if hasattr(config, '__dict__'):
+            return vars(config)
+        elif hasattr(config, 'dict'):
+            return config.dict()
+        elif isinstance(config, dict):
+            return config
+        else:
+            # Try to extract attributes directly
+            return {
+                'type': getattr(config, 'type', None),
+                'endpoint': getattr(config, 'endpoint', None),
+                'api_key': getattr(config, 'api_key', None),
+                'deployment_name': getattr(config, 'deployment_name', None),
+                'model': getattr(config, 'model', None),
+                'temperature': getattr(config, 'temperature', 0.7),
+                'max_tokens': getattr(config, 'max_tokens', 2000),
+                'api_version': getattr(config, 'api_version', '2024-02-01')
+            }
     
     @record_metrics
     async def think(self, user_id: str, message: str, channel: str = "http") -> Dict[str, Any]:
