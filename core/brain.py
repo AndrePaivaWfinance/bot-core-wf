@@ -1,6 +1,6 @@
 """
 Bot Brain - Orchestrator Principal
-Versão completamente migrada para MemoryManager
+Versão com fallback melhorado e tratamento de erros
 """
 from typing import Dict, Any, Optional, List
 import json
@@ -18,8 +18,7 @@ logger = get_logger(__name__)
 
 class BotBrain:
     """
-    Orchestrador central do bot - NOVA ARQUITETURA
-    Usa apenas MemoryManager (sem short_term/long_term)
+    Orchestrador central do bot - COM FALLBACK MELHORADO
     """
     
     def __init__(
@@ -142,99 +141,148 @@ class BotBrain:
     @record_metrics
     async def think(self, user_id: str, message: str, channel: str = "http") -> Dict[str, Any]:
         """
-        Process a message and generate response - NOVA ARQUITETURA
-        
-        Args:
-            user_id: User identifier
-            message: User's message
-            channel: Communication channel
-            
-        Returns:
-            Response with metadata
+        Process a message and generate response - COM FALLBACK MELHORADO
         """
         logger.info(f"🤔 Processing message from {user_id}: {message[:50]}...")
         
         # Build context from memory
         context = await self._build_context(user_id, message)
         
-        # Try to generate response
-        response = await self._generate_response(message, context)
+        # Try to generate response with better error handling
+        try:
+            response = await self._generate_response(message, context)
+        except Exception as e:
+            logger.error(f"Failed to generate response: {str(e)}")
+            # Return a safe error response instead of throwing 500
+            response = {
+                "text": "Desculpe, estou com dificuldades técnicas no momento. Por favor, tente novamente em alguns instantes.",
+                "provider": "error",
+                "provider_used": "none",
+                "error": str(e)
+            }
         
         # Calculate confidence
         confidence = self._calculate_confidence(response["text"])
         
-        # Store interaction in memory - USA APENAS MEMORY MANAGER
+        # Store interaction in memory (even if it failed)
         await self._store_interaction(
             user_id, 
             message, 
             response["text"], 
             {
                 **context,
-                "provider": response["provider"],
+                "provider": response.get("provider", "unknown"),
                 "channel": channel,
-                "confidence": confidence
+                "confidence": confidence,
+                "had_error": "error" in response
             }
         )
         
-        logger.info(f"✨ Response generated using {response['provider']}")
+        logger.info(f"✨ Response generated using {response.get('provider', 'unknown')}")
         
         return {
             "response": response["text"],
             "metadata": {
-                "provider": response["provider"],
+                "provider": response.get("provider", "unknown"),
                 "provider_used": response.get("provider_used", "unknown"),
                 "confidence": confidence,
                 "usage": response.get("usage", {}),
                 "context_used": list(context.keys()),
                 "attempts": response.get("attempts", []),
-                "architecture": "memory_manager"
+                "architecture": "memory_manager",
+                "had_error": "error" in response
             }
         }
     
     async def _generate_response(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate response using available LLM providers"""
+        """Generate response using available LLM providers with better error handling"""
         response = None
         provider_used = "none"
         attempts = []
+        last_error = None
         
         # Try primary provider
-        if self.primary_provider:
+        if self.primary_provider and self.primary_provider.is_available():
             try:
-                logger.info("📡 Attempting PRIMARY provider...")
+                logger.info("📡 Attempting PRIMARY provider (Azure OpenAI)...")
                 response = await self.primary_provider.generate(message, context)
                 provider_used = "primary"
-                attempts.append({"provider": response["provider"], "status": "success"})
+                attempts.append({
+                    "provider": response.get("provider", "azure_openai"),
+                    "status": "success"
+                })
+                logger.info("✅ Primary provider succeeded")
             except Exception as e:
-                logger.error(f"❌ Primary provider failed: {str(e)[:200]}")
-                attempts.append({"provider": "primary", "status": "failed", "error": str(e)[:100]})
+                error_msg = str(e)
+                logger.warning(f"⚠️ Primary provider failed: {error_msg[:200]}")
+                last_error = error_msg
+                attempts.append({
+                    "provider": "azure_openai",
+                    "status": "failed",
+                    "error": error_msg[:100]
+                })
+                # Continue to try fallback
         
-        # Try fallback if primary failed
-        if not response and self.fallback_provider:
+        # Try fallback if primary failed or not available
+        if not response and self.fallback_provider and self.fallback_provider.is_available():
             try:
-                logger.info("📡 Attempting FALLBACK provider...")
+                logger.info("📡 Attempting FALLBACK provider (Claude)...")
                 response = await self.fallback_provider.generate(message, context)
                 provider_used = "fallback"
-                attempts.append({"provider": response["provider"], "status": "success"})
+                attempts.append({
+                    "provider": response.get("provider", "claude"),
+                    "status": "success"
+                })
+                logger.info("✅ Fallback provider succeeded")
             except Exception as e:
-                logger.error(f"❌ Fallback provider failed: {str(e)[:200]}")
-                attempts.append({"provider": "fallback", "status": "failed", "error": str(e)[:100]})
+                error_msg = str(e)
+                logger.warning(f"⚠️ Fallback provider failed: {error_msg[:200]}")
+                last_error = error_msg
+                attempts.append({
+                    "provider": "claude",
+                    "status": "failed",
+                    "error": error_msg[:100]
+                })
         
-        # If all failed, raise error
+        # If both failed, try a simple response without LLM
         if not response:
-            error_msg = "All LLM providers failed"
-            logger.error(f"💀 {error_msg}")
-            raise RuntimeError(error_msg)
+            logger.warning("⚠️ All LLM providers failed - using static response")
+            
+            # Check if it's a simple greeting
+            greetings = ["olá", "oi", "hello", "hi", "bom dia", "boa tarde", "boa noite"]
+            if any(greeting in message.lower() for greeting in greetings):
+                response = {
+                    "text": "Olá! Sou o Mesh, seu assistente financeiro. Como posso ajudá-lo hoje?",
+                    "provider": "static",
+                    "provider_used": "static"
+                }
+            # Check if it's asking about status
+            elif any(word in message.lower() for word in ["status", "funcionando", "working", "ok"]):
+                response = {
+                    "text": "Estou operacional, mas com recursos limitados no momento. Os serviços de IA estão temporariamente indisponíveis.",
+                    "provider": "static",
+                    "provider_used": "static"
+                }
+            else:
+                # Generic fallback
+                response = {
+                    "text": "Desculpe, estou com dificuldades técnicas para processar sua mensagem no momento. Por favor, tente novamente mais tarde ou entre em contato com o suporte.",
+                    "provider": "error",
+                    "provider_used": "none",
+                    "error": last_error or "All providers unavailable"
+                }
         
         response["provider_used"] = provider_used
         response["attempts"] = attempts
+        
         return response
     
     async def _build_context(self, user_id: str, message: str) -> Dict[str, Any]:
-        """Build context from memory systems - NOVA ARQUITETURA"""
+        """Build context from memory systems"""
         context = {}
         
         try:
-            # PRINCIPAL: Memory Manager
+            # Memory Manager context
             if self.memory_manager:
                 # Histórico de conversas
                 history = await self.memory_manager.get_conversation_history(user_id, limit=5)
@@ -276,7 +324,7 @@ class BotBrain:
         response: str,
         context: Dict[str, Any]
     ):
-        """Store interaction in memory - USA APENAS MEMORY MANAGER"""
+        """Store interaction in memory"""
         try:
             # Armazenar via Memory Manager
             if self.memory_manager:
@@ -287,7 +335,8 @@ class BotBrain:
                     metadata={
                         "confidence": context.get("confidence", 0.7),
                         "provider": context.get("provider", "unknown"),
-                        "channel": context.get("channel", "http")
+                        "channel": context.get("channel", "http"),
+                        "had_error": context.get("had_error", False)
                     }
                 )
                 logger.debug(f"💾 Conversation saved via Memory Manager")
@@ -314,8 +363,10 @@ class BotBrain:
         """Calculate confidence score for the response"""
         confidence = 0.7  # Base confidence
         
-        # Adjust based on response characteristics
-        if len(response) < 10:
+        # Lower confidence for error/static responses
+        if "dificuldades técnicas" in response or "temporariamente indisponíveis" in response:
+            confidence = 0.2
+        elif len(response) < 10:
             confidence -= 0.2
         elif len(response) > 100:
             confidence += 0.1

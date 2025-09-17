@@ -15,7 +15,7 @@ CONTAINER_NAME="meshbrain"
 IMAGE_NAME="meshbrain"
 ACR_NAME="meshbrainregistry"
 FULL_IMAGE="meshbrainregistry.azurecr.io/meshbrain"
-VERSION="v1.2.9"
+VERSION="v1.2.10"
 PORT="8001"  # Usar porta diferente para evitar conflitos
 
 clear
