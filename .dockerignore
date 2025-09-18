@@ -10,12 +10,14 @@ __pycache__
 dist
 build
 
-# Environments
+# Virtual environments
 .env.example
+.env.local
 .venv
 env/
 venv/
 ENV/
+.virtualenv
 
 # IDE
 .vscode/
@@ -26,11 +28,13 @@ ENV/
 # Git
 .git
 .gitignore
+.github/
 
 # Docker
 .dockerignore
 docker-compose*.yml
 Dockerfile*
+.docker/
 
 # Logs
 *.log
@@ -41,6 +45,7 @@ logs/
 .coverage
 htmlcov/
 tests/
+test_*.py
 
 # OS
 .DS_Store
@@ -49,6 +54,36 @@ Thumbs.db
 # Documentation
 *.md
 docs/
+README.md
 
-# Cache
+# Scripts de desenvolvimento
+scripts/
+Makefile
+
+# Cache e temp
 .cache/
+*.tmp
+temp/
+tmp/
+
+# Azure specific
+.azure/
+*.PublishSettings
+
+# Backups
+*.backup
+.backup/
+backups/
+
+# Node (se houver)
+node_modules/
+package*.json
+
+# Configs de desenvolvimento local
+*.local
+.env.development
+.env.staging
+
+# Notebooks
+*.ipynb
+.ipynb_checkpoints/

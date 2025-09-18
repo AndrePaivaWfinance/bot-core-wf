@@ -1,104 +1,95 @@
 #!/bin/bash
-# Script de Deploy Automatizado para Azure
+# deploy_with_fixed_dockerfile.sh
 
-set -e  # Para em caso de erro
+set -e
 
-# Cores
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Configurações
-ACR_NAME="meshbrainregistry"
-IMAGE_NAME="meshbrain"
-WEBAPP_NAME="meshbrain"
-RESOURCE_GROUP="rg-wf-ia-gpt41"
+VERSION="v1.4.0"  # Nova versão
 
-# Versão
-VERSION=1.2.10
-FULL_IMAGE="$ACR_NAME.azurecr.io/$IMAGE_NAME:$VERSION"
+echo -e "${BLUE}🚀 DEPLOY COM DOCKERFILE CORRIGIDO${NC}"
+echo "======================================"
 
-echo -e "${GREEN}🚀 Deploy do Bot Framework - v$VERSION${NC}"
-echo "========================================="
-
-# 1. Verificar pré-requisitos
-echo -e "\n${YELLOW}📋 Verificando pré-requisitos...${NC}"
-
-if ! command -v docker &> /dev/null; then
-    echo -e "${RED}❌ Docker não está instalado${NC}"
+# 1. Verificar arquivos
+echo -e "\n${YELLOW}1. Verificando arquivos...${NC}"
+if [ ! -f "Dockerfile" ]; then
+    echo -e "${RED}❌ Dockerfile não encontrado${NC}"
     exit 1
 fi
 
-if ! command -v az &> /dev/null; then
-    echo -e "${RED}❌ Azure CLI não está instalado${NC}"
+if [ ! -f "requirements.txt" ]; then
+    echo -e "${RED}❌ requirements.txt não encontrado${NC}"
     exit 1
 fi
 
-# 2. Login no Azure
-echo -e "\n${YELLOW}🔐 Fazendo login no Azure...${NC}"
-az account show &> /dev/null || az login
+# 2. Login no ACR
+echo -e "\n${YELLOW}2. Login no ACR...${NC}"
+az acr login -n meshbrainregistry
 
-# 3. Login no ACR
-echo -e "\n${YELLOW}🔐 Login no Container Registry...${NC}"
-az acr login --name $ACR_NAME
+# 3. Build com Docker Buildx para AMD64
+echo -e "\n${YELLOW}3. Building para AMD64...${NC}"
+docker buildx build \
+  --platform linux/amd64 \
+  -t meshbrainregistry.azurecr.io/meshbrain:$VERSION \
+  --push \
+  .
 
-# 4. Build da imagem
-echo -e "\n${YELLOW}🔨 Building Docker image...${NC}"
-docker build -t $IMAGE_NAME:latest .
-docker tag $IMAGE_NAME:latest $FULL_IMAGE
-
-# 5. Push para ACR
-echo -e "\n${YELLOW}📤 Pushing to ACR...${NC}"
-docker push $FULL_IMAGE
-
-# 6. Atualizar Web App
-echo -e "\n${YELLOW}🔄 Atualizando Web App...${NC}"
-az webapp config container set \
-  -n $WEBAPP_NAME \
-  -g $RESOURCE_GROUP \
-  -i $FULL_IMAGE
-
-# 7. Configurar variáveis de ambiente
-echo -e "\n${YELLOW}⚙️ Verificando variáveis de ambiente...${NC}"
-
-# Verificar se ANTHROPIC_API_KEY está configurada
-if ! az webapp config appsettings list -n $WEBAPP_NAME -g $RESOURCE_GROUP --query "[?name=='ANTHROPIC_API_KEY'].name" -o tsv | grep -q "ANTHROPIC_API_KEY"; then
-    echo -e "${YELLOW}Configurando ANTHROPIC_API_KEY...${NC}"
-    if [ -f .env ]; then
-        source .env
-        if [ ! -z "$ANTHROPIC_API_KEY" ]; then
-            az webapp config appsettings set -n $WEBAPP_NAME -g $RESOURCE_GROUP --settings ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
-        fi
-    fi
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ Build falhou${NC}"
+    exit 1
 fi
 
-# 8. Restart do Web App
-echo -e "\n${YELLOW}🔄 Reiniciando Web App...${NC}"
-az webapp restart -n $WEBAPP_NAME -g $RESOURCE_GROUP
+echo -e "${GREEN}✅ Build e push concluídos${NC}"
 
-# 9. Aguardar inicialização
-echo -e "\n${YELLOW}⏳ Aguardando inicialização (30s)...${NC}"
-sleep 30
-
-# 10. Testar health check
-echo -e "\n${YELLOW}🧪 Testando health check...${NC}"
-HEALTH_URL="https://$WEBAPP_NAME.azurewebsites.net/healthz"
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $HEALTH_URL)
-
-if [ "$HTTP_CODE" == "200" ]; then
-    echo -e "${GREEN}✅ Deploy concluído com sucesso!${NC}"
-    echo -e "${GREEN}✅ Health check OK${NC}"
-    curl -s $HEALTH_URL | python3 -m json.tool
+# 4. Verificar no ACR
+echo -e "\n${YELLOW}4. Verificando no ACR...${NC}"
+if az acr repository show-tags -n meshbrainregistry --repository meshbrain | grep -q "$VERSION"; then
+    echo -e "${GREEN}✅ $VERSION no ACR${NC}"
 else
-    echo -e "${RED}❌ Health check falhou (HTTP $HTTP_CODE)${NC}"
-    echo -e "${YELLOW}Verificando logs...${NC}"
-    az webapp log tail -n $WEBAPP_NAME -g $RESOURCE_GROUP --timeout 30
+    echo -e "${RED}❌ $VERSION não encontrada${NC}"
+    exit 1
 fi
 
-echo -e "\n${GREEN}=========================================${NC}"
-echo -e "${GREEN}Deploy Information:${NC}"
-echo -e "  Image: $FULL_IMAGE"
-echo -e "  WebApp: https://$WEBAPP_NAME.azurewebsites.net"
-echo -e "  Version: $VERSION"
-echo -e "${GREEN}=========================================${NC}"
+# 5. Deploy no Web App
+echo -e "\n${YELLOW}5. Configurando Web App...${NC}"
+az webapp config container set \
+  -n meshbrain \
+  -g rg-wf-ia-gpt41 \
+  -i meshbrainregistry.azurecr.io/meshbrain:$VERSION
+
+# 6. Garantir configurações críticas
+echo -e "\n${YELLOW}6. Configurando variáveis críticas...${NC}"
+az webapp config appsettings set -n meshbrain -g rg-wf-ia-gpt41 --settings \
+  WEBSITES_PORT=8000 \
+  SCM_DO_BUILD_DURING_DEPLOYMENT=false \
+  WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
+  DOCKER_ENABLE_CI=true \
+  --output none
+
+# 7. Restart
+echo -e "\n${YELLOW}7. Reiniciando...${NC}"
+az webapp restart -n meshbrain -g rg-wf-ia-gpt41
+
+# 8. Monitorar
+echo -e "\n${YELLOW}8. Aguardando inicialização...${NC}"
+sleep 60
+
+# 9. Testar
+echo -e "\n${YELLOW}9. Testando...${NC}"
+for i in {1..3}; do
+    response=$(curl -s -o /dev/null -w "%{http_code}" https://meshbrain.azurewebsites.net/healthz)
+    if [ "$response" == "200" ]; then
+        echo -e "${GREEN}✅ SUCESSO! App rodando!${NC}"
+        curl -s https://meshbrain.azurewebsites.net/healthz | python3 -m json.tool
+        exit 0
+    fi
+    echo "Tentativa $i/3... HTTP $response"
+    sleep 30
+done
+
+echo -e "${RED}❌ App não respondeu${NC}"
+az webapp log tail -n meshbrain -g rg-wf-ia-gpt41 --timeout 30
