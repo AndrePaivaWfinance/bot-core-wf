@@ -116,7 +116,7 @@ class ClaudeProvider(LLMProvider):
             # Inicializar cliente com a API key e timeout aumentado
             self.client = anthropic.Anthropic(
                 api_key=api_key,
-                timeout=40.0,  # Timeout de 30 segundos
+                timeout=30.0,  # Timeout de 30 segundos
                 max_retries=2,  # Máximo de 2 tentativas
                 # Nota: Anthropic SDK atualmente não usa api_version no construtor
                 # mas guardamos para referência/logging
@@ -181,7 +181,7 @@ class ClaudeProvider(LLMProvider):
             start_time = asyncio.get_event_loop().time()
             message = await asyncio.wait_for(
                 loop.run_in_executor(None, create_message),
-                timeout=45.0  # Timeout interno de 35s (margem de segurança)
+                timeout=35.0  # Timeout interno de 35s (margem de segurança)
             )
             elapsed_time = asyncio.get_event_loop().time() - start_time
             logger.info(f"   Claude responded in {elapsed_time:.1f}s")

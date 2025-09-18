@@ -1,6 +1,7 @@
 """
 Bot Brain - Orchestrator Principal
 Versão com fallback melhorado e tratamento de erros
+CORRIGIDO: Agora inclui contexto de memória nas chamadas LLM
 """
 from typing import Dict, Any, Optional, List
 import json
@@ -18,7 +19,7 @@ logger = get_logger(__name__)
 
 class BotBrain:
     """
-    Orchestrador central do bot - COM FALLBACK MELHORADO
+    Orchestrador central do bot - COM FALLBACK MELHORADO E CONTEXTO DE MEMÓRIA
     """
     
     def __init__(
@@ -195,17 +196,27 @@ class BotBrain:
         }
     
     async def _generate_response(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate response using available LLM providers with better error handling"""
+        """Generate response using available LLM providers WITH CONTEXT"""
         response = None
         provider_used = "none"
         attempts = []
         last_error = None
         
+        # NOVO: Construir prompt com contexto de memória
+        enhanced_prompt = self._build_enhanced_prompt(message, context)
+        
+        # Log se está usando contexto
+        if context.get("conversation_history") or context.get("user_preferences"):
+            logger.info("📝 Using memory context in prompt")
+            logger.debug(f"   History items: {len(context.get('conversation_history', []))}")
+            logger.debug(f"   Has preferences: {bool(context.get('user_preferences'))}")
+        
         # Try primary provider
         if self.primary_provider and self.primary_provider.is_available():
             try:
                 logger.info("📡 Attempting PRIMARY provider (Azure OpenAI)...")
-                response = await self.primary_provider.generate(message, context)
+                # MUDANÇA: Usar enhanced_prompt ao invés de message simples
+                response = await self.primary_provider.generate(enhanced_prompt, context)
                 provider_used = "primary"
                 attempts.append({
                     "provider": response.get("provider", "azure_openai"),
@@ -227,7 +238,8 @@ class BotBrain:
         if not response and self.fallback_provider and self.fallback_provider.is_available():
             try:
                 logger.info("📡 Attempting FALLBACK provider (Claude)...")
-                response = await self.fallback_provider.generate(message, context)
+                # MUDANÇA: Usar enhanced_prompt ao invés de message simples
+                response = await self.fallback_provider.generate(enhanced_prompt, context)
                 provider_used = "fallback"
                 attempts.append({
                     "provider": response.get("provider", "claude"),
@@ -277,6 +289,63 @@ class BotBrain:
         
         return response
     
+    def _build_enhanced_prompt(self, message: str, context: Dict[str, Any]) -> str:
+        """
+        NOVO MÉTODO: Constrói prompt incluindo contexto de memória
+        Formata o prompt para incluir histórico e informações relevantes
+        """
+        prompt_parts = []
+        
+        # 1. Adicionar histórico de conversas se disponível
+        conversation_history = context.get("conversation_history", [])
+        if conversation_history:
+            prompt_parts.append("### Contexto da Conversa Anterior ###")
+            # Pegar últimas 5 conversas, mas limitar tamanho
+            for conv in conversation_history[-5:]:
+                user_msg = conv.get('message', '')[:200]  # Limitar tamanho
+                bot_response = conv.get('response', '')[:200]
+                if user_msg and bot_response:
+                    prompt_parts.append(f"Usuário: {user_msg}")
+                    prompt_parts.append(f"Assistente: {bot_response}")
+            prompt_parts.append("")  # Linha em branco
+        
+        # 2. Adicionar preferências do usuário se disponível
+        user_preferences = context.get("user_preferences", {})
+        if user_preferences:
+            prompt_parts.append("### Informações sobre o Usuário ###")
+            for key, value in user_preferences.items():
+                if value:  # Apenas se tiver valor
+                    prompt_parts.append(f"- {key}: {value}")
+            prompt_parts.append("")  # Linha em branco
+        
+        # 3. Adicionar documentos recuperados (RAG) se disponível
+        retrieved_docs = context.get("retrieved_documents", [])
+        if retrieved_docs:
+            prompt_parts.append("### Documentos Relevantes ###")
+            for doc in retrieved_docs[:3]:  # Top 3 documentos
+                content = doc.get('content', '')[:300]  # Limitar tamanho
+                if content:
+                    prompt_parts.append(f"- {content}")
+            prompt_parts.append("")  # Linha em branco
+        
+        # 4. Adicionar instrução se há contexto
+        if conversation_history or user_preferences:
+            prompt_parts.append("### Instrução ###")
+            prompt_parts.append("Por favor, considere o contexto e histórico acima ao responder. Mantenha consistência com as informações já discutidas.")
+            prompt_parts.append("")
+        
+        # 5. Adicionar a mensagem atual
+        prompt_parts.append("### Mensagem Atual do Usuário ###")
+        prompt_parts.append(message)
+        
+        # Juntar tudo
+        enhanced_prompt = "\n".join(prompt_parts)
+        
+        # Log do tamanho do prompt para debug
+        logger.debug(f"Enhanced prompt size: {len(enhanced_prompt)} chars")
+        
+        return enhanced_prompt
+    
     async def _build_context(self, user_id: str, message: str) -> Dict[str, Any]:
         """Build context from memory systems"""
         context = {}
@@ -286,20 +355,23 @@ class BotBrain:
             if self.memory_manager:
                 # Histórico de conversas
                 history = await self.memory_manager.get_conversation_history(user_id, limit=5)
-                context["conversation_history"] = history
+                if history:
+                    context["conversation_history"] = history
+                    logger.debug(f"💾 Loaded {len(history)} conversations from MemoryManager")
                 
                 # Contexto do usuário
                 user_context = await self.memory_manager.get_user_context(user_id)
                 if user_context:
                     context["user_preferences"] = user_context
-                
-                logger.debug(f"💾 Loaded {len(history)} conversations from MemoryManager")
+                    logger.debug(f"💾 Loaded user preferences from MemoryManager")
             
             # Learning context (se aplicável)
             if self.learning_system:
                 try:
                     learning = await self.learning_system.apply_learning(user_id)
-                    context.update(learning)
+                    if learning:
+                        context.update(learning)
+                        logger.debug(f"🎓 Applied learning context")
                 except Exception as e:
                     logger.debug(f"Learning system not available: {str(e)}")
             
@@ -307,10 +379,14 @@ class BotBrain:
             if self.retrieval_system:
                 try:
                     retrieval = await self.retrieval_system.retrieve_relevant_documents(message)
-                    context["retrieved_documents"] = retrieval
-                    logger.debug(f"📚 Retrieved {len(retrieval)} documents")
+                    if retrieval:
+                        context["retrieved_documents"] = retrieval
+                        logger.debug(f"📚 Retrieved {len(retrieval)} documents")
                 except Exception as e:
                     logger.debug(f"Retrieval system error: {str(e)}")
+            
+            # Log resumo do contexto construído
+            logger.info(f"📋 Context built: {list(context.keys())}")
             
         except Exception as e:
             logger.error(f"Error building context: {str(e)}")
@@ -371,7 +447,11 @@ class BotBrain:
         elif len(response) > 100:
             confidence += 0.1
         
-        if "I don't know" in response or "I'm not sure" in response:
+        # Boost confidence if response seems contextual
+        if any(word in response.lower() for word in ["você mencionou", "anteriormente", "como disse", "conforme"]):
+            confidence += 0.1
+        
+        if "I don't know" in response or "I'm not sure" in response or "não tenho acesso" in response:
             confidence -= 0.3
         
         if "?" in response:
