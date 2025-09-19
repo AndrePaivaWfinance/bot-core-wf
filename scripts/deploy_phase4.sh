@@ -9,7 +9,7 @@ ACR_NAME="meshbrainregistry"
 RESOURCE_GROUP="rg-wf-ia-gpt41"
 WEBAPP_NAME="meshbrain"
 IMAGE_NAME="meshbrain"
-VERSION="v3.0.0"
+VERSION="v4.0.3"
 FULL_IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_NAME}"
 
 # Cores

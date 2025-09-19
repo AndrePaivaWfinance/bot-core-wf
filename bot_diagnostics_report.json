@@ -1,0 +1,67 @@
+{
+  "timestamp": "2025-09-19T14:46:56.059536",
+  "results": [
+    {
+      "test": "Health Endpoint",
+      "status": "PASS",
+      "details": "{'status': 'ok', 'bot': '', 'version': '3.0.0', 'components': {'brain': 'healthy', 'memory': 'healthy', 'teams': 'healthy', 'bot_framework_configured': True}}",
+      "timestamp": "2025-09-19T14:46:51.580443"
+    },
+    {
+      "test": "API Messages OPTIONS",
+      "status": "PASS",
+      "details": "Status: 405",
+      "timestamp": "2025-09-19T14:46:51.816726"
+    },
+    {
+      "test": "API Messages POST",
+      "status": "PASS",
+      "details": "Valid response with from.id=bot",
+      "timestamp": "2025-09-19T14:46:53.300235"
+    },
+    {
+      "test": "Response Format",
+      "status": "PASS",
+      "details": "True",
+      "timestamp": "2025-09-19T14:46:54.728830"
+    },
+    {
+      "test": "Conversation Update",
+      "status": "PASS",
+      "details": "Status: 200",
+      "timestamp": "2025-09-19T14:46:54.953194"
+    },
+    {
+      "test": "Bot Framework Auth",
+      "status": "PASS",
+      "details": "Auth test passed: 200",
+      "timestamp": "2025-09-19T14:46:56.058719"
+    },
+    {
+      "test": "Bot Service Config",
+      "status": "PASS",
+      "details": "Comandos Azure CLI fornecidos",
+      "timestamp": "2025-09-19T14:46:56.058817"
+    },
+    {
+      "test": "App Settings",
+      "status": "PASS",
+      "details": "Comando fornecido",
+      "timestamp": "2025-09-19T14:46:56.058841"
+    },
+    {
+      "test": "Log Analysis",
+      "status": "PASS",
+      "details": "Comando de logs fornecido",
+      "timestamp": "2025-09-19T14:46:56.058861"
+    },
+    {
+      "test": "Direct Line Test",
+      "status": "PASS",
+      "details": "Instru\u00e7\u00f5es fornecidas",
+      "timestamp": "2025-09-19T14:46:56.058905"
+    }
+  ],
+  "errors": [],
+  "warnings": []
+}

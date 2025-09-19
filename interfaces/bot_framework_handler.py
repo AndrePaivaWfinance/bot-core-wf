@@ -80,38 +80,13 @@ class BotFrameworkHandler:
                     return Response(status_code=200)
                     
             except Exception as e:
-                logger.error(f"Error processing Bot Framework message: {str(e)}", exc_info=True)
-                return Response(status_code=500, content=str(e))
+                logger.error(f"Error in messages_handler: {str(e)}")
+                return Response(status_code=500)
         
-        @self.router.get("/api/health")
-        async def health_check():
-            """Health check endpoint para o Bot Framework"""
-            return JSONResponse({
-                "status": "healthy",
-                "service": "Bot Framework Handler",
-                "app_id_configured": bool(self.app_id),
-                "tenant_id": self.tenant_id
-            })
-        
-        @self.router.post("/api/messages/test")
-        async def test_endpoint(request: Request):
-            """Endpoint de teste para verificar integração"""
-            if os.getenv("BOT_ENV", "production").lower() == "production":
-                raise HTTPException(status_code=403, detail="Test endpoint disabled in production")
-            
-            test_activity = {
-                "type": "message",
-                "text": "Teste de mensagem",
-                "from": {"id": "test_user"},
-                "recipient": {"id": "bot"},
-                "conversation": {"id": "test_conversation"},
-                "channelId": "test",
-                "id": "test_message_id",
-                "serviceUrl": "http://localhost"
-            }
-            
-            response = await self._process_activity(test_activity)
-            return JSONResponse(response if response else {"status": "ok"})
+        @self.router.options("/api/messages")
+        async def messages_options() -> Response:
+            """Handle OPTIONS requests for CORS"""
+            return Response(status_code=200)
     
     async def _process_activity(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -119,174 +94,194 @@ class BotFrameworkHandler:
         """
         activity_type = activity.get('type', '')
         
-        # Trata diferentes tipos de activity
         if activity_type == 'message':
-            return await self._handle_message(activity)
-        elif activity_type == 'conversationUpdate':
-            return await self._handle_conversation_update(activity)
-        elif activity_type == 'invoke':
-            return await self._handle_invoke(activity)
-        else:
-            logger.info(f"Received activity type '{activity_type}' - no action needed")
-            return None
-    
-    async def _handle_message(self, activity: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Processa mensagens de texto
-        """
-        try:
             # Extrai informações da mensagem
-            text = activity.get('text', '')
             user_id = activity.get('from', {}).get('id', 'unknown')
-            user_name = activity.get('from', {}).get('name', 'User')
-            conversation_id = activity.get('conversation', {}).get('id', 'unknown')
-            channel_id = activity.get('channelId', 'unknown')
-            service_url = activity.get('serviceUrl', '')
+            user_name = activity.get('from', {}).get('name', '')
+            text = activity.get('text', '')
+            channel_id = activity.get('channelId', 'emulator')
+            conversation_id = activity.get('conversation', {}).get('id', '')
             
-            logger.info(f"Processing message from {user_name} ({user_id}): {text[:50]}...")
+            logger.info(f"Processing message from {user_name} ({user_id}): {text}")
             
-            # Processa através do Brain
-            response = await self.brain.think(
-                user_id=user_id,
-                message=text,
-                channel=channel_id,
-                metadata={
-                    'user_name': user_name,
-                    'conversation_id': conversation_id,
-                    'service_url': service_url,
-                    'channel_id': channel_id,
-                    'activity_id': activity.get('id'),
-                    'locale': activity.get('locale', 'pt-BR')
-                }
-            )
-            
-            # Formata resposta para o Bot Framework
-            reply_activity = {
-                'type': 'message',
-                'from': activity.get('recipient'),
-                'recipient': activity.get('from'),
-                'conversation': activity.get('conversation'),
-                'text': response.get('response', 'Desculpe, não consegui processar sua mensagem.'),
-                'replyToId': activity.get('id'),
-                'locale': activity.get('locale', 'pt-BR')
-            }
-            
-            # Se precisar enviar a resposta proativamente
-            if service_url:
-                await self._send_proactive_message(service_url, conversation_id, reply_activity)
-                return None  # Retorna None quando enviado proativamente
-            else:
-                return reply_activity
-                
-        except Exception as e:
-            logger.error(f"Error handling message: {str(e)}", exc_info=True)
-            return {
-                'type': 'message',
-                'text': f'Erro ao processar mensagem: {str(e)}'
-            }
-    
-    async def _handle_conversation_update(self, activity: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Trata atualizações de conversa (usuários entrando/saindo)
-        """
-        members_added = activity.get('membersAdded', [])
-        members_removed = activity.get('membersRemoved', [])
-        
-        # Envia mensagem de boas-vindas para novos membros
-        for member in members_added:
-            if member.get('id') != activity.get('recipient', {}).get('id'):
-                logger.info(f"New member joined: {member.get('name', 'Unknown')}")
-                return {
-                    'type': 'message',
-                    'text': f"Olá! Sou o Mesh, seu assistente financeiro de BPO. Como posso ajudá-lo hoje?"
-                }
-        
-        # Log quando membros saem
-        for member in members_removed:
-            logger.info(f"Member left: {member.get('name', 'Unknown')}")
-        
-        return None
-    
-    async def _handle_invoke(self, activity: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Trata invocações especiais (cards adaptativos, etc.)
-        """
-        invoke_name = activity.get('name', '')
-        logger.info(f"Received invoke: {invoke_name}")
-        
-        # Retorna resposta padrão para invokes
-        return {
-            'status': 200,
-            'body': {}
-        }
-    
-    async def _send_proactive_message(self, service_url: str, conversation_id: str, activity: Dict[str, Any]):
-        """
-        Envia mensagem proativa para o Teams
-        """
-        try:
-            # Obtém token de autenticação se configurado
-            headers = {
-                'Content-Type': 'application/json'
-            }
-            
-            if self.app_id and self.app_password:
-                token = await self._get_auth_token()
-                if token:
-                    headers['Authorization'] = f'Bearer {token}'
-            
-            # Constrói URL para enviar mensagem
-            url = f"{service_url}v3/conversations/{conversation_id}/activities"
-            
-            # Envia mensagem
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    url,
-                    json=activity,
-                    headers=headers,
-                    timeout=30.0
+            # Processa a mensagem com o Brain
+            try:
+                response = await self.brain.process_message(
+                    user_id=user_id,
+                    message=text,
+                    channel="teams"
                 )
                 
-                if response.status_code >= 200 and response.status_code < 300:
-                    logger.info(f"Proactive message sent successfully to conversation {conversation_id}")
+                response_text = response.get('response', 'Desculpe, ocorreu um erro ao processar sua mensagem.')
+                
+                # IMPORTANTE: Enviar resposta pelo Bot Framework
+                await self._send_reply(activity, response_text)
+                
+                # Retorna resposta para o endpoint (para compatibilidade)
+                return {
+                    "type": "message",
+                    "from": {"id": self.app_id or "bot", "name": "Mesh"},
+                    "recipient": activity.get('from'),
+                    "conversation": activity.get('conversation'),
+                    "text": response_text,
+                    "replyToId": activity.get('id'),
+                    "locale": "pt-BR"
+                }
+                
+            except Exception as e:
+                logger.error(f"Error processing message: {str(e)}")
+                error_msg = "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente."
+                await self._send_reply(activity, error_msg)
+                return {
+                    "type": "message",
+                    "text": error_msg
+                }
+        
+        elif activity_type == 'conversationUpdate':
+            # Mensagem de boas-vindas quando bot é adicionado
+            members_added = activity.get('membersAdded', [])
+            bot_id = activity.get('recipient', {}).get('id', '')
+            
+            for member in members_added:
+                if member.get('id') != bot_id:
+                    welcome_msg = (
+                        "👋 Olá! Eu sou o Mesh, seu assistente virtual.\n\n"
+                        "Estou aqui para ajudar com suas dúvidas e tarefas. "
+                        "Como posso ajudá-lo hoje?"
+                    )
+                    await self._send_reply(activity, welcome_msg)
+                    
+            return None
+        
+        elif activity_type == 'typing':
+            # Ignora eventos de digitação
+            logger.info("Received activity type 'typing' - no action needed")
+            return None
+        
+        else:
+            logger.info(f"Received unsupported activity type: {activity_type}")
+            return None
+    
+    async def _send_reply(self, activity: Dict[str, Any], response_text: str):
+        """
+        Envia resposta de volta pelo Bot Framework
+        """
+        service_url = activity.get('serviceUrl', '')
+        conversation_id = activity.get('conversation', {}).get('id', '')
+        activity_id = activity.get('id', '')
+        
+        if not service_url or not conversation_id:
+            logger.error("Missing serviceUrl or conversation.id")
+            return
+        
+        # URL para enviar resposta
+        reply_url = f"{service_url}v3/conversations/{conversation_id}/activities/{activity_id}"
+        
+        # Activity de resposta
+        reply_activity = {
+            "type": "message",
+            "from": {
+                "id": self.app_id or "bot",
+                "name": "Mesh"
+            },
+            "recipient": activity.get('from'),
+            "conversation": activity.get('conversation'),
+            "text": response_text,
+            "replyToId": activity_id,
+            "locale": "pt-BR",
+            "channelData": {}
+        }
+        
+        # Obter token de autenticação
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        if self.app_id and self.app_password:
+            token = await self._get_auth_token()
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+                logger.info("Using authenticated request")
+            else:
+                logger.warning("Failed to get auth token, sending without authentication")
+        
+        # Enviar resposta
+        try:
+            logger.info(f"Sending reply to: {reply_url}")
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    reply_url,
+                    json=reply_activity,
+                    headers=headers,
+                    timeout=10.0
+                )
+                
+                if response.status_code in [200, 201, 202]:
+                    logger.info("✅ Reply sent successfully to Bot Framework")
                 else:
-                    logger.error(f"Failed to send proactive message: {response.status_code} - {response.text}")
+                    logger.error(f"❌ Failed to send reply: {response.status_code}")
+                    logger.error(f"Response: {response.text}")
                     
         except Exception as e:
-            logger.error(f"Error sending proactive message: {str(e)}", exc_info=True)
+            logger.error(f"❌ Error sending reply: {str(e)}")
     
     async def _get_auth_token(self) -> str:
         """
-        Obtém token de autenticação do Azure AD para Bot Framework
+        Obtém token de autenticação do Bot Framework
         """
         if not self.app_id or not self.app_password:
+            logger.warning("No app_id or app_password configured")
             return ""
         
         try:
-            # URL de autenticação para single-tenant
-            auth_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
+            # Usa o tenant específico configurado
+            tenant = self.tenant_id if hasattr(self, 'tenant_id') else '9ad45470-e5c8-45d9-a335-b5f311990261'
+            logger.info(f"Attempting auth with tenant: {tenant}, app_id: {self.app_id[:8]}...")
             
+            # URL de autenticação com tenant específico
+            auth_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+            
+            # Formato correto para Bot Framework single-tenant
             data = {
-                'grant_type': 'client_credentials',
-                'client_id': self.app_id,
-                'client_secret': self.app_password,
-                'scope': 'https://api.botframework.com/.default'
+                "grant_type": "client_credentials",
+                "client_id": self.app_id.strip(),
+                "client_secret": self.app_password.strip(),
+                "scope": "https://api.botframework.com/.default"
             }
             
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     auth_url,
-                    data=data,
-                    timeout=10.0
+                    data=data,  # Use data, not json
+                    headers={"Content-Type": "application/x-www-form-urlencoded"}
                 )
                 
                 if response.status_code == 200:
                     token_data = response.json()
-                    return token_data.get('access_token', '')
+                    logger.info("Successfully obtained auth token")
+                    return token_data.get("access_token", "")
                 else:
-                    logger.error(f"Failed to get auth token: {response.status_code} - {response.text}")
+                    logger.error(f"Failed to get auth token: {response.status_code}")
+                    logger.error(f"Response: {response.text}")
                     return ""
                     
         except Exception as e:
-            logger.error(f"Error getting auth token: {str(e)}", exc_info=True)
+            logger.error(f"Error getting auth token: {str(e)}")
             return ""
+    
+    async def test_connection(self) -> bool:
+        """
+        Testa a conexão com o Bot Framework
+        """
+        try:
+            token = await self._get_auth_token()
+            if token:
+                logger.info("✅ Bot Framework authentication successful")
+                return True
+            else:
+                logger.error("❌ Bot Framework authentication failed")
+                return False
+        except Exception as e:
+            logger.error(f"❌ Bot Framework test failed: {str(e)}")
+            return False

@@ -160,7 +160,12 @@ class Settings(BaseModel):
             memory=MemoryConfig(),
             claude=ClaudeConfig(),  # Vai pegar ANTHROPIC_API_KEY automaticamente
             monitoring=MonitoringConfig(),
-            teams=TeamsConfig()
+            # CORREÇÃO PRINCIPAL: Passar as variáveis de ambiente para TeamsConfig
+            teams=TeamsConfig(
+                app_id=os.getenv("MICROSOFT_APP_ID") or os.getenv("TEAMS_APP_ID"),
+                app_password=os.getenv("MICROSOFT_APP_PASSWORD") or os.getenv("TEAMS_APP_PASSWORD"),
+                tenant_id=os.getenv("MICROSOFT_APP_TENANT_ID") or os.getenv("TEAMS_TENANT_ID")
+            )
         )
 
 def get_settings() -> Settings:
