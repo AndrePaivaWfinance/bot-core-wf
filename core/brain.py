@@ -1,12 +1,10 @@
 """
-Bot Brain - Orchestrator Principal com Sistema de Aprendizagem
-Versão 3.0.0 - COMPLETA com Learning System integrado
-WFinance Bot Framework - Mesh
+Bot Brain - Versão Corrigida
+Baseado no backup funcional com Learning System
 """
 from typing import Dict, Any, Optional, List
-import json
 import time
-from datetime import datetime
+import os
 
 from config.settings import Settings
 from core.llm import create_provider, LLMProvider
@@ -17,17 +15,17 @@ from skills.skill_registry import SkillRegistry
 from utils.logger import get_logger
 from utils.metrics import record_metrics
 
-# NOVO: Imports do Sistema de Aprendizagem
-from learning.core.learning_engine import LearningEngine
-from learning.models.user_profile import UserProfile
+# Learning imports (opcional)
+try:
+    from learning.core.learning_engine import LearningEngine
+    LEARNING_ENABLED = True
+except ImportError:
+    LEARNING_ENABLED = False
 
 logger = get_logger(__name__)
 
 class BotBrain:
-    """
-    Orchestrador central do bot - COM LEARNING SYSTEM COMPLETO
-    Versão 3.0.0 - Fase 4 implementada
-    """
+    """Orchestrador central do bot - VERSÃO CORRIGIDA"""
     
     def __init__(
         self,
@@ -43,9 +41,14 @@ class BotBrain:
         self.retrieval_system = retrieval_system
         self.skill_registry = skill_registry
         
-        # NOVO: Inicializar Learning Engine
-        self.learning_engine = LearningEngine()
-        logger.info("🧠 Learning Engine initialized")
+        # Learning Engine opcional
+        self.learning_engine = None
+        if LEARNING_ENABLED:
+            try:
+                self.learning_engine = LearningEngine(settings, memory_manager)
+                logger.info("✅ Learning Engine initialized")
+            except Exception as e:
+                logger.warning(f"⚠️ Learning Engine disabled: {e}")
         
         # Initialize LLM providers
         self.primary_provider = None
@@ -61,306 +64,268 @@ class BotBrain:
         
         # Initialize primary provider
         primary_config = self._get_llm_config("primary")
-        if primary_config:
+        if primary_config and primary_config.get('type'):
             try:
-                self.primary_provider = create_provider(primary_config["provider"], primary_config)
-                if self.primary_provider and self.primary_provider.is_available():
-                    logger.info(f"✅ Primary LLM Provider initialized: {primary_config['provider']}")
-                else:
-                    logger.warning(f"❌ Primary provider {primary_config['provider']} not available")
-                    self.primary_provider = None
+                self.primary_provider = create_provider(
+                    primary_config['type'],
+                    primary_config
+                )
+                logger.info(f"✅ Primary provider ({primary_config['type']}) initialized")
             except Exception as e:
-                logger.error(f"Failed to initialize primary provider: {str(e)}")
-                self.primary_provider = None
+                logger.error(f"❌ Failed to initialize primary provider: {str(e)}")
         
         # Initialize fallback provider
         fallback_config = self._get_llm_config("fallback")
-        if fallback_config:
+        if fallback_config and fallback_config.get('type'):
             try:
-                self.fallback_provider = create_provider(fallback_config["provider"], fallback_config)
-                if self.fallback_provider and self.fallback_provider.is_available():
-                    logger.info(f"✅ Fallback LLM Provider initialized: {fallback_config['provider']}")
-                else:
-                    logger.warning(f"❌ Fallback provider {fallback_config['provider']} not available")
-                    self.fallback_provider = None
+                self.fallback_provider = create_provider(
+                    fallback_config['type'],
+                    fallback_config
+                )
+                logger.info(f"✅ Fallback provider ({fallback_config['type']}) initialized")
             except Exception as e:
-                logger.error(f"Failed to initialize fallback provider: {str(e)}")
-                self.fallback_provider = None
+                logger.error(f"❌ Failed to initialize fallback provider: {str(e)}")
+        
+        # Log final status
+        self._log_provider_status()
+    
+    def _get_llm_config(self, provider_type: str) -> Optional[Dict]:
+        """Extract LLM config from settings - CORRIGIDO"""
+        if not hasattr(self.settings, 'llm'):
+            return None
+        
+        llm_config = self.settings.llm
+        
+        # Handle dict access (nosso caso)
+        if isinstance(llm_config, dict):
+            if provider_type == "primary":
+                config = llm_config.get('primary')
+            else:
+                config = llm_config.get('fallback_llm')
+        else:
+            # Try object attributes
+            if provider_type == "primary":
+                config = getattr(llm_config, 'primary', None)
+            else:
+                config = getattr(llm_config, 'fallback_llm', None)
+        
+        # Convert to dict if needed
+        if config and not isinstance(config, dict):
+            config = self._config_to_dict(config)
+        
+        return config
+    
+    def _config_to_dict(self, config) -> dict:
+        """Convert config object to dictionary"""
+        if hasattr(config, '__dict__'):
+            return vars(config)
+        elif hasattr(config, 'dict'):
+            return config.dict()
+        elif hasattr(config, 'model_dump'):
+            return config.model_dump()
+        elif isinstance(config, dict):
+            return config
+        else:
+            # Try to extract attributes directly
+            return {
+                'type': getattr(config, 'type', None),
+                'endpoint': getattr(config, 'endpoint', None),
+                'api_key': getattr(config, 'api_key', None),
+                'deployment_name': getattr(config, 'deployment_name', None),
+                'model': getattr(config, 'model', None),
+                'temperature': getattr(config, 'temperature', 0.7),
+                'max_tokens': getattr(config, 'max_tokens', 2000),
+                'api_version': getattr(config, 'api_version', '2024-02-01')
+            }
+    
+    def _log_provider_status(self):
+        """Log the status of LLM providers"""
+        logger.info("=" * 60)
         
         if not self.primary_provider and not self.fallback_provider:
-            logger.error("⚠️ No LLM providers available! Bot will not function properly.")
+            logger.error("⚠️ WARNING: No LLM providers configured!")
+        elif not self.primary_provider:
+            logger.warning("⚠️ Primary provider not configured, using only fallback")
+        elif not self.fallback_provider:
+            logger.warning("⚠️ Fallback provider not configured, no redundancy")
+        else:
+            logger.info("✅ Both primary and fallback providers are ready!")
         
         logger.info("=" * 60)
     
-    def _get_llm_config(self, provider_type: str) -> Optional[Dict[str, Any]]:
-        """Get LLM configuration for specified provider type"""
-        if provider_type == "primary" and self.settings.llm and self.settings.llm.primary_model:
-            return self.settings.llm.primary_model.model_dump()
-        elif provider_type == "fallback" and self.settings.llm and self.settings.llm.fallback_model:
-            return self.settings.llm.fallback_model.model_dump()
-        return None
-    
-    async def think(
-        self,
-        user_id: str,
-        message: str,
-        channel: str = "unknown",
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Main thinking process - NOW WITH LEARNING SYSTEM
-        """
+    @record_metrics
+    async def think(self, user_id: str, message: str, channel: str = "http") -> Dict[str, Any]:
+        """Process a message and generate response - COM FALLBACK"""
+        logger.info(f"🤔 Processing message from {user_id}: {message[:50]}...")
+        
         start_time = time.time()
         
+        # Build context from memory
+        context = await self._build_context(user_id, message)
+        
+        # Apply learning if available
+        if self.learning_engine:
+            try:
+                profile = await self.learning_engine.get_or_create_profile(user_id)
+                await self.learning_engine.record_interaction(
+                    user_id, message, channel, {}
+                )
+                context["user_style"] = profile.communication_style
+                context["user_expertise"] = profile.expertise_level
+            except Exception as e:
+                logger.debug(f"Learning not applied: {e}")
+        
+        # Try to generate response
         try:
-            # NOVO: 1. Recuperar ou criar perfil do usuário
-            user_profile = await self.learning_engine.get_or_create_profile(user_id)
-            logger.debug(f"👤 User profile loaded: {user_profile.communication_style}, expertise: {user_profile.expertise_level}")
-            
-            # NOVO: 2. Registrar interação para aprendizado
-            await self.learning_engine.record_interaction(
-                user_id=user_id,
-                message=message,
-                channel=channel,
-                metadata=metadata or {}
-            )
-            
-            # NOVO: 3. Detectar padrões do usuário
-            patterns = await self.learning_engine.detect_patterns(user_id)
-            if patterns:
-                logger.info(f"🔍 Detected {len(patterns)} patterns for user {user_id}")
-            
-            # 4. Build context from memory (existente + aprimorado)
-            context = await self._build_context(user_id, message)
-            
-            # NOVO: 5. Adicionar informações de aprendizado ao contexto
-            context["user_profile"] = {
-                "style": user_profile.communication_style,
-                "expertise": user_profile.expertise_level,
-                "preferences": user_profile.preferences,
-                "satisfaction": user_profile.satisfaction_score
-            }
-            context["patterns"] = [
-                {
-                    "type": p.pattern_type,
-                    "description": p.description,
-                    "confidence": p.confidence
-                }
-                for p in patterns[:5]  # Top 5 padrões
-            ]
-            
-            # 6. Build enhanced prompt WITH PERSONALIZATION
-            enhanced_prompt = self._build_enhanced_prompt_with_learning(
-                message=message,
-                context=context,
-                user_profile=user_profile,
-                patterns=patterns
-            )
-            
-            # 7. Generate response (com fallback)
-            response = await self._generate_response(enhanced_prompt, user_id)
-            
-            # NOVO: 8. Registrar resposta para aprendizado
-            response_time = time.time() - start_time
-            await self.learning_engine.record_response(
-                user_id=user_id,
-                response=response,
-                response_time=response_time
-            )
-            
-            # 9. Calculate confidence
-            confidence = self._calculate_confidence(response)
-            
-            # NOVO: 10. Atualizar satisfação baseado em sinais
-            if "obrigado" in message.lower() or "perfeito" in message.lower():
-                user_profile.satisfaction_score = min(1.0, user_profile.satisfaction_score + 0.1)
-            elif "não entendi" in message.lower() or "errado" in message.lower():
-                user_profile.satisfaction_score = max(0.0, user_profile.satisfaction_score - 0.1)
-            
-            # 11. Store interaction with learning metadata
-            await self._store_interaction(
-                user_id, 
-                message, 
-                response, 
-                {
-                    **context,
-                    "confidence": confidence,
-                    "processing_time": response_time,
-                    "personalization_applied": True,
-                    "patterns_used": len(patterns),
-                    "user_expertise": user_profile.expertise_level
-                }
-            )
-            
-            # 12. Build final response with metadata
-            return {
-                "response": response,
-                "metadata": {
-                    "user_id": user_id,
-                    "channel": channel,
-                    "processing_time": response_time,
-                    "confidence": confidence,
-                    "provider": context.get("provider_used", "unknown"),
-                    "memory_context": bool(context.get("conversation_history")),
-                    # NOVO: Metadata de aprendizado
-                    "personalization": {
-                        "style": user_profile.communication_style,
-                        "expertise": user_profile.expertise_level,
-                        "patterns_detected": len(patterns),
-                        "satisfaction_score": user_profile.satisfaction_score
-                    }
-                }
-            }
-            
+            response = await self._generate_response(message, context)
         except Exception as e:
-            logger.error(f"Error in thinking process: {str(e)}")
-            logger.exception("Full traceback:")
-            
-            # Fallback response
-            return {
-                "response": "Desculpe, estou com dificuldades técnicas no momento. Por favor, tente novamente.",
-                "metadata": {
-                    "user_id": user_id,
-                    "channel": channel,
-                    "error": True,
-                    "error_type": type(e).__name__
-                }
+            logger.error(f"Failed to generate response: {str(e)}")
+            response = {
+                "text": "Desculpe, estou com dificuldades técnicas no momento. Por favor, tente novamente.",
+                "provider": "error",
+                "provider_used": "none",
+                "error": str(e)
             }
+        
+        processing_time = time.time() - start_time
+        
+        # Calculate confidence
+        confidence = self._calculate_confidence(response["text"])
+        
+        # Store interaction in memory
+        await self._store_interaction(
+            user_id, 
+            message, 
+            response["text"], 
+            {
+                **context,
+                "provider": response.get("provider", "unknown"),
+                "channel": channel,
+                "confidence": confidence,
+                "processing_time": processing_time
+            }
+        )
+        
+        logger.info(f"✨ Response generated using {response.get('provider', 'unknown')}")
+        
+        return {
+            "response": response["text"],
+            "metadata": {
+                "user_id": user_id,
+                "channel": channel,
+                "processing_time": processing_time,
+                "confidence": confidence,
+                "provider": response.get("provider", "unknown"),
+                "provider_used": response.get("provider_used", "unknown"),
+                "has_context": bool(context.get("conversation_history")),
+                "architecture": "memory_manager"
+            }
+        }
     
-    def _build_enhanced_prompt_with_learning(
-        self, 
-        message: str, 
-        context: Dict[str, Any],
-        user_profile: UserProfile,
-        patterns: List[Any]
-    ) -> str:
-        """
-        Build enhanced prompt WITH PERSONALIZATION based on learning
-        """
-        prompt_parts = []
-        
-        # 1. System prompt base
-        prompt_parts.append("### Contexto do Sistema ###")
-        prompt_parts.append("Você é o Mesh, um analista financeiro especialista em BPO da WFinance.")
-        prompt_parts.append("")
-        
-        # 2. NOVO: Personalização baseada no perfil
-        prompt_parts.append("### Personalização ###")
-        
-        # Estilo de comunicação
-        if user_profile.communication_style == "formal":
-            prompt_parts.append("- Use linguagem formal e profissional")
-            prompt_parts.append("- Seja respeitoso e use tratamento adequado")
-        elif user_profile.communication_style == "casual":
-            prompt_parts.append("- Use linguagem amigável e acessível")
-            prompt_parts.append("- Seja informal mas profissional")
-        else:
-            prompt_parts.append("- Mantenha um tom neutro e profissional")
-        
-        # Tamanho de resposta
-        if user_profile.preferred_response_length == "concise":
-            prompt_parts.append("- Seja BREVE e direto ao ponto")
-            prompt_parts.append("- Evite explicações desnecessárias")
-        elif user_profile.preferred_response_length == "detailed":
-            prompt_parts.append("- Forneça explicações DETALHADAS")
-            prompt_parts.append("- Inclua exemplos quando relevante")
-        
-        # Nível de expertise
-        if user_profile.expertise_level == "expert":
-            prompt_parts.append("- O usuário é EXPERIENTE, use termos técnicos")
-            prompt_parts.append("- Não explique conceitos básicos")
-        elif user_profile.expertise_level == "beginner":
-            prompt_parts.append("- O usuário é INICIANTE, evite jargões")
-            prompt_parts.append("- Explique conceitos técnicos de forma simples")
-        elif user_profile.expertise_level == "intermediate":
-            prompt_parts.append("- O usuário tem conhecimento INTERMEDIÁRIO")
-            prompt_parts.append("- Balance entre técnico e acessível")
-        
-        prompt_parts.append("")
-        
-        # 3. NOVO: Padrões detectados
-        if patterns:
-            prompt_parts.append("### Padrões e Preferências do Usuário ###")
-            for pattern in patterns[:3]:  # Top 3 padrões mais relevantes
-                if pattern.pattern_type == "recurring_question":
-                    prompt_parts.append(f"- Frequentemente pergunta sobre: {pattern.description}")
-                elif pattern.pattern_type == "daily_routine":
-                    prompt_parts.append(f"- Rotina usual: {pattern.description}")
-                elif pattern.pattern_type == "topic_sequence":
-                    prompt_parts.append(f"- Costuma discutir: {pattern.description}")
-                elif pattern.pattern_type == "preference":
-                    prompt_parts.append(f"- Preferência: {pattern.description}")
-            prompt_parts.append("")
-        
-        # 4. Contexto de memória (se houver)
-        conversation_history = context.get("conversation_history", [])
-        if conversation_history:
-            prompt_parts.append("### Histórico Recente ###")
-            for conv in conversation_history[-3:]:  # Últimas 3 interações
-                prompt_parts.append(f"Usuário: {conv.get('user', 'N/A')[:100]}...")
-                prompt_parts.append(f"Assistente: {conv.get('assistant', 'N/A')[:100]}...")
-            prompt_parts.append("")
-        
-        # 5. NOVO: Informações específicas do usuário
-        if user_profile.preferences:
-            prompt_parts.append("### Preferências Específicas ###")
-            for key, value in user_profile.preferences.items():
-                if key == "topics_of_interest":
-                    prompt_parts.append(f"- Interesses: {', '.join(value) if isinstance(value, list) else value}")
-                elif key == "preferred_examples":
-                    prompt_parts.append(f"- Tipos de exemplo preferidos: {value}")
-            prompt_parts.append("")
-        
-        # 6. Mensagem atual
-        prompt_parts.append("### Mensagem Atual ###")
-        prompt_parts.append(message)
-        prompt_parts.append("")
-        
-        # 7. Instruções finais personalizadas
-        prompt_parts.append("### Instruções ###")
-        prompt_parts.append("Responda de forma personalizada considerando todas as informações acima.")
-        
-        # Adicionar instruções específicas baseadas na satisfação
-        if user_profile.satisfaction_score < 0.5:
-            prompt_parts.append("IMPORTANTE: O usuário parece insatisfeito. Seja especialmente cuidadoso e solicito.")
-        elif user_profile.satisfaction_score > 0.8:
-            prompt_parts.append("O usuário está satisfeito com o serviço. Continue com o excelente trabalho!")
-        
-        return "\n".join(prompt_parts)
-    
-    async def _generate_response(self, prompt: str, user_id: str) -> str:
-        """Generate response using available providers with fallback"""
+    async def _generate_response(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate response using available LLM providers - USANDO generate()"""
         response = None
-        provider_used = None
+        provider_used = "none"
+        attempts = []
+        last_error = None
         
-        # Try primary provider first
+        # Build enhanced prompt with context
+        enhanced_prompt = self._build_enhanced_prompt(message, context)
+        
+        # Log if using context
+        if context.get("conversation_history"):
+            logger.info("📝 Using memory context in prompt")
+        
+        # Try primary provider
         if self.primary_provider and self.primary_provider.is_available():
             try:
-                logger.debug(f"Using primary provider for user {user_id}")
-                response = await self.primary_provider.generate_response(prompt, user_id)
+                logger.info("📡 Attempting PRIMARY provider (Azure OpenAI)...")
+                # USANDO generate() como no backup
+                response = await self.primary_provider.generate(enhanced_prompt, context)
                 provider_used = "primary"
+                attempts.append({"provider": "azure_openai", "status": "success"})
+                logger.info("✅ Primary provider succeeded")
             except Exception as e:
-                logger.warning(f"Primary provider failed: {str(e)}")
+                logger.warning(f"⚠️ Primary provider failed: {str(e)[:200]}")
+                last_error = str(e)
+                attempts.append({"provider": "azure_openai", "status": "failed", "error": str(e)[:100]})
         
-        # Fallback to secondary if needed
+        # Try fallback if primary failed
         if not response and self.fallback_provider and self.fallback_provider.is_available():
             try:
-                logger.debug(f"Using fallback provider for user {user_id}")
-                response = await self.fallback_provider.generate_response(prompt, user_id)
+                logger.info("📡 Attempting FALLBACK provider (Claude)...")
+                # USANDO generate() como no backup
+                response = await self.fallback_provider.generate(enhanced_prompt, context)
                 provider_used = "fallback"
+                attempts.append({"provider": "claude", "status": "success"})
+                logger.info("✅ Fallback provider succeeded")
             except Exception as e:
-                logger.error(f"Fallback provider also failed: {str(e)}")
+                logger.warning(f"⚠️ Fallback provider failed: {str(e)[:200]}")
+                last_error = str(e)
+                attempts.append({"provider": "claude", "status": "failed", "error": str(e)[:100]})
         
-        # Last resort - static response
+        # If both failed, use static response
         if not response:
-            logger.error("All providers failed - using static response")
-            response = "Desculpe, nossos serviços estão temporariamente indisponíveis. Por favor, tente novamente em alguns instantes."
-            provider_used = "static"
+            logger.warning("⚠️ All LLM providers failed - using static response")
+            
+            # Check for simple greetings
+            greetings = ["olá", "oi", "hello", "hi", "bom dia", "boa tarde", "boa noite"]
+            if any(greeting in message.lower() for greeting in greetings):
+                response = {
+                    "text": "Olá! Sou o Mesh, seu assistente financeiro. Como posso ajudá-lo hoje?",
+                    "provider": "static",
+                    "provider_used": "static"
+                }
+            else:
+                response = {
+                    "text": "Desculpe, estou com dificuldades técnicas para processar sua mensagem no momento.",
+                    "provider": "error",
+                    "provider_used": "none",
+                    "error": last_error or "All providers unavailable"
+                }
         
-        # Store provider info for metrics
-        self._last_provider_used = provider_used
+        response["provider_used"] = provider_used
+        response["attempts"] = attempts
         
         return response
+    
+    def _build_enhanced_prompt(self, message: str, context: Dict[str, Any]) -> str:
+        """Build prompt including context from memory - SIMPLIFICADO"""
+        prompt_parts = []
+        
+        # Add conversation history if available
+        conversation_history = context.get("conversation_history", [])
+        if conversation_history:
+            prompt_parts.append("### Contexto da Conversa Anterior ###")
+            for conv in conversation_history[-3:]:  # Last 3 messages
+                user_msg = conv.get('message', '')[:200]
+                bot_response = conv.get('response', '')[:200]
+                if user_msg and bot_response:
+                    prompt_parts.append(f"Usuário: {user_msg}")
+                    prompt_parts.append(f"Assistente: {bot_response}")
+            prompt_parts.append("")
+        
+        # Add user style if available
+        if context.get("user_style"):
+            prompt_parts.append("### Estilo de Comunicação ###")
+            style = context["user_style"]
+            if style == "formal":
+                prompt_parts.append("Use linguagem formal e profissional.")
+            elif style == "casual":
+                prompt_parts.append("Use linguagem amigável e acessível.")
+            prompt_parts.append("")
+        
+        # Add instruction
+        if conversation_history:
+            prompt_parts.append("### Instrução ###")
+            prompt_parts.append("Considere o contexto acima ao responder.")
+            prompt_parts.append("")
+        
+        # Add current message
+        prompt_parts.append("### Mensagem Atual ###")
+        prompt_parts.append(message)
+        
+        return "\n".join(prompt_parts)
     
     async def _build_context(self, user_id: str, message: str) -> Dict[str, Any]:
         """Build context from memory systems"""
@@ -369,70 +334,63 @@ class BotBrain:
         try:
             # Memory Manager context
             if self.memory_manager:
-                # Histórico de conversas
+                # Get conversation history
                 history = await self.memory_manager.get_conversation_history(user_id, limit=5)
                 if history:
                     context["conversation_history"] = history
-                    logger.debug(f"💾 Loaded {len(history)} conversations from MemoryManager")
+                    logger.debug(f"💾 Loaded {len(history)} conversations")
                 
-                # Contexto do usuário
+                # Get user context
                 user_context = await self.memory_manager.get_user_context(user_id)
                 if user_context:
                     context["user_preferences"] = user_context
-                    logger.debug(f"💾 Loaded user preferences from MemoryManager")
+                    logger.debug(f"💾 Loaded user preferences")
             
-            # Learning context (sistema antigo - compatibilidade)
+            # Learning context
             if self.learning_system:
                 try:
                     learning = await self.learning_system.apply_learning(user_id)
                     if learning:
                         context.update(learning)
                 except Exception as e:
-                    logger.debug(f"Legacy learning system not active: {str(e)}")
+                    logger.debug(f"Learning system not available: {e}")
             
-            # Retrieval context
+            # Retrieval context (RAG)
             if self.retrieval_system:
                 try:
-                    relevant_docs = await self.retrieval_system.retrieve(message, user_id)
-                    if relevant_docs:
-                        context["relevant_documents"] = relevant_docs
-                        logger.debug(f"📚 Retrieved {len(relevant_docs)} relevant documents")
+                    retrieval = await self.retrieval_system.retrieve_relevant_documents(message)
+                    if retrieval:
+                        context["retrieved_documents"] = retrieval
+                        logger.debug(f"📚 Retrieved {len(retrieval)} documents")
                 except Exception as e:
-                    logger.debug(f"Retrieval system not active: {str(e)}")
+                    logger.debug(f"Retrieval system error: {e}")
+            
+            logger.info(f"📋 Context built: {list(context.keys())}")
             
         except Exception as e:
             logger.error(f"Error building context: {str(e)}")
         
         return context
     
-    async def _store_interaction(
-        self,
-        user_id: str,
-        message: str,
-        response: str,
-        context: Dict[str, Any]
-    ):
-        """Store interaction in memory and learning systems"""
+    async def _store_interaction(self, user_id: str, message: str, response: str, context: Dict[str, Any]):
+        """Store interaction in memory - USANDO save_conversation()"""
         try:
-            # Memory Manager storage
             if self.memory_manager:
-                await self.memory_manager.store_conversation(
+                # USANDO save_conversation como no backup
+                await self.memory_manager.save_conversation(
                     user_id=user_id,
-                    user_message=message,
-                    assistant_response=response,
+                    message=message,
+                    response=response,
                     metadata={
-                        "channel": context.get("channel", "unknown"),
                         "confidence": context.get("confidence", 0.7),
-                        "provider": self._last_provider_used if hasattr(self, '_last_provider_used') else "unknown",
-                        "processing_time": context.get("processing_time", 0),
-                        "personalization_applied": context.get("personalization_applied", False),
-                        "patterns_used": context.get("patterns_used", 0),
-                        "user_expertise": context.get("user_expertise", "unknown")
+                        "provider": context.get("provider", "unknown"),
+                        "channel": context.get("channel", "http"),
+                        "processing_time": context.get("processing_time", 0)
                     }
                 )
-                logger.debug(f"💾 Conversation saved with learning metadata")
+                logger.debug(f"💾 Conversation saved")
             
-            # Legacy learning system (compatibilidade)
+            # Learning system
             if self.learning_system:
                 try:
                     await self.learning_system.learn_from_interaction(
@@ -445,130 +403,65 @@ class BotBrain:
                         }
                     )
                 except Exception as e:
-                    logger.debug(f"Legacy learning system not active: {str(e)}")
+                    logger.debug(f"Learning system not active: {e}")
             
         except Exception as e:
             logger.error(f"Error storing interaction: {str(e)}")
     
     def _calculate_confidence(self, response: str) -> float:
         """Calculate confidence score for the response"""
-        confidence = 0.7  # Base confidence
+        confidence = 0.7
         
-        # Lower confidence for error/static responses
-        if "dificuldades técnicas" in response or "temporariamente indisponíveis" in response:
+        # Lower confidence for error responses
+        if "dificuldades técnicas" in response or "temporariamente" in response:
             confidence = 0.2
         elif len(response) < 10:
             confidence -= 0.2
         elif len(response) > 100:
             confidence += 0.1
         
-        # Boost confidence if response seems contextual
-        if any(word in response.lower() for word in ["você mencionou", "anteriormente", "como disse", "conforme"]):
+        # Boost if contextual
+        if any(word in response.lower() for word in ["você mencionou", "anteriormente"]):
             confidence += 0.1
         
-        if "não sei" in response.lower() or "não tenho certeza" in response.lower():
-            confidence -= 0.3
-        
-        if "?" in response:
-            confidence -= 0.1
-        
-        # Ensure confidence is between 0 and 1
         return max(0.1, min(0.99, confidence))
     
     def get_memory_stats(self) -> Dict[str, Any]:
-        """Retorna estatísticas de memória"""
-        stats = {}
-        
+        """Get memory statistics"""
         if self.memory_manager:
-            stats["memory"] = self.memory_manager.get_storage_stats()
-        
-        # NOVO: Adicionar estatísticas de aprendizado
-        if self.learning_engine:
-            stats["learning"] = {
-                "profiles_cached": len(self.learning_engine.profiles_cache),
-                "patterns_detected": sum(len(p) for p in self.learning_engine.patterns_cache.values()),
-                "store_available": self.learning_engine.store is not None
-            }
-        
-        return stats
+            return self.memory_manager.get_storage_stats()
+        return {"status": "no_memory_manager"}
     
     async def get_user_history(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Recupera histórico do usuário via Memory Manager"""
+        """Get user conversation history"""
         if self.memory_manager:
             return await self.memory_manager.get_conversation_history(user_id, limit)
         return []
     
-    # NOVO: Método para obter insights do usuário
     async def get_user_insights(self, user_id: str) -> Dict[str, Any]:
-        """Retorna insights detalhados sobre o usuário"""
-        insights = {
-            "user_id": user_id,
-            "profile": None,
-            "patterns": [],
-            "history_summary": None
-        }
+        """Get user insights from learning system"""
+        insights = {"user_id": user_id}
         
-        # Obter perfil
         if self.learning_engine:
-            profile = await self.learning_engine.get_or_create_profile(user_id)
-            insights["profile"] = {
-                "style": profile.communication_style,
-                "expertise": profile.expertise_level,
-                "preferences": profile.preferences,
-                "total_interactions": profile.total_interactions,
-                "satisfaction_score": profile.satisfaction_score,
-                "last_seen": profile.last_interaction.isoformat() if profile.last_interaction else None
-            }
-            
-            # Obter padrões
-            patterns = await self.learning_engine.detect_patterns(user_id)
-            insights["patterns"] = [
-                {
-                    "type": p.pattern_type,
-                    "description": p.description,
-                    "confidence": p.confidence,
-                    "occurrences": p.occurrences
+            try:
+                profile = await self.learning_engine.get_or_create_profile(user_id)
+                insights["profile"] = {
+                    "style": profile.communication_style,
+                    "expertise": profile.expertise_level,
+                    "interactions": profile.total_interactions
                 }
-                for p in patterns
-            ]
+            except:
+                pass
         
-        # Resumo do histórico
         if self.memory_manager:
-            history = await self.get_user_history(user_id, limit=5)
-            if history:
-                insights["history_summary"] = {
-                    "total_conversations": len(history),
-                    "recent_topics": self._extract_topics(history),
-                    "average_response_time": self._calculate_avg_response_time(history)
-                }
+            history = await self.get_user_history(user_id, 5)
+            insights["history_count"] = len(history)
         
         return insights
     
-    def _extract_topics(self, history: List[Dict]) -> List[str]:
-        """Extrai tópicos principais do histórico"""
-        # Implementação simplificada - pode ser melhorada com NLP
-        topics = []
-        keywords = ["imposto", "fluxo de caixa", "relatório", "análise", "BPO", "faturamento"]
-        
-        for conv in history:
-            msg = conv.get("user", "").lower()
-            for keyword in keywords:
-                if keyword in msg and keyword not in topics:
-                    topics.append(keyword)
-        
-        return topics[:5]  # Top 5 tópicos
-    
-    def _calculate_avg_response_time(self, history: List[Dict]) -> float:
-        """Calcula tempo médio de resposta"""
-        times = []
-        for conv in history:
-            if "metadata" in conv and "processing_time" in conv["metadata"]:
-                times.append(conv["metadata"]["processing_time"])
-        
-        return sum(times) / len(times) if times else 0.0
-    
     def is_available(self) -> bool:
         """Check if at least one provider is available"""
-        primary_available = self.primary_provider and self.primary_provider.is_available()
-        fallback_available = self.fallback_provider and self.fallback_provider.is_available()
-        return primary_available or fallback_available
+        return bool(
+            (self.primary_provider and self.primary_provider.is_available()) or
+            (self.fallback_provider and self.fallback_provider.is_available())
+        )

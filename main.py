@@ -1,3 +1,9 @@
+"""
+Bot Framework - Main Application
+Version: 3.0.0 with Learning System
+WFinance - Mesh Financial Analyst
+Porta padrão: 8000
+"""
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Dict, Any
@@ -38,7 +44,7 @@ async def lifespan(app: FastAPI):
     
     # ===== STARTUP =====
     logger.info("=" * 60)
-    logger.info("🚀 Starting Bot Framework v2.0.0...")
+    logger.info("🚀 Starting Bot Framework v3.0.0...")
     logger.info("=" * 60)
     
     try:
@@ -125,9 +131,9 @@ async def lifespan(app: FastAPI):
         
         logger.info("=" * 60)
         logger.info("✅ Bot Framework started successfully!")
-        logger.info(f"   Version: 2.0.0")
-        logger.info(f"   Architecture: Memory Manager")
-        logger.info(f"   Ready to receive messages")
+        logger.info(f"   Version: 3.0.0")
+        logger.info(f"   Architecture: Memory Manager + Learning System")
+        logger.info(f"   Ready to receive messages on port 8000")
         logger.info("=" * 60)
         
         yield
@@ -184,8 +190,8 @@ def _log_provider_status():
 # Cria a aplicação FastAPI
 app = FastAPI(
     title="Bot Framework - Mesh",
-    description="AI-powered BPO Financial Analyst Bot",
-    version="2.0.0",
+    description="AI-powered BPO Financial Analyst Bot with Learning System",
+    version="3.0.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc"
@@ -213,121 +219,137 @@ app.include_router(metrics_router)
 async def root():
     """Endpoint raiz com informações do sistema."""
     return {
-        "service": "Bot Framework - Mesh",
-        "status": "online",
-        "version": "2.0.0",
-        "architecture": "memory_manager",
-        "bot": {
-            "name": app_components.get('settings', {}).bot.name if 'settings' in app_components else "Mesh",
-            "type": app_components.get('settings', {}).bot.type if 'settings' in app_components else "financial_analyst"
-        },
+        "service": "meshbrain",
+        "version": "3.0.0",
+        "status": "running",
+        "description": "WFinance Bot Framework - Mesh Financial Analyst",
+        "features": [
+            "Multi-tier Memory System",
+            "Learning System (Phase 4)",
+            "Pattern Detection",
+            "User Personalization"
+        ],
         "endpoints": {
             "health": "/healthz",
-            "metrics": "/metrics",
+            "docs": "/docs",
             "messages": "/v1/messages",
-            "bot_framework": "/api/messages",
             "memory_stats": "/v1/memory/stats",
-            "docs": "/docs"
-        },
-        "timestamp": os.popen('date').read().strip()
+            "user_insights": "/v1/users/{user_id}/insights"
+        }
     }
 
 @app.get("/healthz")
 async def health_check():
-    """Health check endpoint com informações detalhadas."""
+    """Health check endpoint detalhado."""
     
     health_status = {
         "status": "ok",
         "service": "meshbrain",
-        "version": "2.0.0",
-        "architecture": "memory_manager",
-        "timestamp": os.popen('date').read().strip(),
-        "checks": {},
-        "environment": {
-            "bot_env": os.getenv("BOT_ENV", "production"),
-            "port": os.getenv("PORT", "8000")
-        }
+        "version": "3.0.0",
+        "architecture": "memory_manager_learning",
+        "timestamp": os.popen('date').read().strip()
     }
     
-    # Verifica configurações
+    # Verifica componentes
+    checks = {}
+    
+    # Settings
+    checks["settings"] = '✅' if 'settings' in app_components else '❌'
+    
+    # Brain
+    if 'brain' in app_components:
+        checks["brain"] = '✅'
+        brain = app_components['brain']
+        
+        # Verifica providers
+        if brain.primary_provider and brain.primary_provider.is_available():
+            checks["azure_openai"] = '✅'
+            health_status["provider_primary"] = "azure_openai"
+        else:
+            checks["azure_openai"] = '❌'
+            health_status["provider_primary"] = "none"
+        
+        if brain.fallback_provider and brain.fallback_provider.is_available():
+            checks["claude"] = '✅'
+            health_status["provider_fallback"] = "claude"
+        else:
+            checks["claude"] = '⚠️'
+            health_status["provider_fallback"] = "none"
+    else:
+        checks["brain"] = '❌'
+    
+    # Memory Manager
+    if 'memory_manager' in app_components:
+        checks["memory_manager"] = '✅'
+        try:
+            mem_stats = app_components['memory_manager'].get_storage_stats()
+            health_status["memory_health"] = mem_stats.get("health", "unknown")
+            health_status["memory_providers"] = {
+                "hot": mem_stats["providers"]["hot"]["available"],
+                "warm": mem_stats["providers"]["warm"]["available"],
+                "cold": mem_stats["providers"]["cold"]["available"]
+            }
+        except:
+            health_status["memory_health"] = "error"
+    else:
+        checks["memory_manager"] = '❌'
+    
+    # Bot Framework / Teams
+    if 'bot_framework' in app_components:
+        checks["bot_framework"] = '✅'
+        health_status["teams_configured"] = True
+    else:
+        checks["bot_framework"] = '⚠️'
+        health_status["teams_configured"] = False
+    
+    # Skills
+    if 'skill_registry' in app_components:
+        checks["skills"] = '✅'
+    else:
+        checks["skills"] = '❌'
+    
+    # Learning System
+    if 'learning_system' in app_components:
+        checks["learning"] = '✅'
+    else:
+        checks["learning"] = '❌'
+    
+    # Retrieval System
+    if 'retrieval_system' in app_components:
+        checks["retrieval"] = '✅'
+    else:
+        checks["retrieval"] = '❌'
+    
+    health_status["checks"] = checks
+    
+    # Environment info
+    health_status["environment"] = {
+        "bot_env": os.getenv("BOT_ENV", "production"),
+        "port": "8000"
+    }
+    
+    # Bot info
     if 'settings' in app_components:
         settings = app_components['settings']
         health_status["bot"] = settings.bot.name
         health_status["bot_type"] = settings.bot.type
-        health_status["checks"]["settings"] = "✅"
-    else:
-        health_status["checks"]["settings"] = "❌"
-        health_status["status"] = "degraded"
-    
-    # Verifica brain e providers
-    if 'brain' in app_components:
-        brain = app_components['brain']
-        health_status["checks"]["brain"] = "✅"
-        
-        # Verifica providers
-        if brain.primary_provider and brain.primary_provider.is_available():
-            health_status["provider_primary"] = "azure_openai"
-            health_status["checks"]["azure_openai"] = "✅"
-        else:
-            health_status["provider_primary"] = "none"
-            health_status["checks"]["azure_openai"] = "❌"
-            
-        if brain.fallback_provider and brain.fallback_provider.is_available():
-            health_status["provider_fallback"] = "claude"
-            health_status["checks"]["claude"] = "✅"
-        else:
-            health_status["provider_fallback"] = "none"
-            health_status["checks"]["claude"] = "⚠️"
-    else:
-        health_status["checks"]["brain"] = "❌"
-        health_status["status"] = "unhealthy"
-    
-    # Verifica Memory Manager
-    if 'memory_manager' in app_components:
-        memory_stats = app_components['memory_manager'].get_storage_stats()
-        health_status["checks"]["memory_manager"] = "✅"
-        health_status["memory_health"] = memory_stats["health"]
-        health_status["memory_providers"] = {
-            provider: status["available"]
-            for provider, status in memory_stats["providers"].items()
-        }
-    else:
-        health_status["checks"]["memory_manager"] = "❌"
-        health_status["status"] = "unhealthy"
-    
-    # Verifica Bot Framework
-    if 'bot_framework' in app_components:
-        health_status["checks"]["bot_framework"] = "✅"
-        health_status["bot_framework_endpoint"] = "/api/messages"
-        health_status["teams_configured"] = True
-    else:
-        health_status["checks"]["bot_framework"] = "⚠️"
-        health_status["teams_configured"] = False
-    
-    # Verifica outros componentes
-    health_status["checks"]["skills"] = "✅" if 'skill_registry' in app_components else "❌"
-    health_status["checks"]["learning"] = "✅" if 'learning_system' in app_components else "❌"
-    health_status["checks"]["retrieval"] = "✅" if 'retrieval_system' in app_components else "❌"
     
     # Determina status geral
-    critical_checks = ["brain", "memory_manager", "settings"]
-    failed_critical = [check for check in critical_checks if health_status["checks"].get(check) == "❌"]
-    
-    if failed_critical:
+    critical_checks = ["brain", "memory_manager"]
+    if any(checks.get(check) == '❌' for check in critical_checks):
         health_status["status"] = "unhealthy"
-        health_status["failed_components"] = failed_critical
-    elif health_status["checks"].get("azure_openai") == "❌" and health_status["checks"].get("claude") == "⚠️":
+    elif checks.get("azure_openai") == '❌' and checks.get("claude") != '✅':
         health_status["status"] = "degraded"
         health_status["warning"] = "No LLM providers available"
-    
-    # Retorna com status HTTP apropriado
-    status_code = 200 if health_status["status"] == "ok" else 503 if health_status["status"] == "unhealthy" else 200
+    else:
+        health_status["status"] = "healthy"
     
     return health_status
 
 @app.get("/v1/memory/stats")
-async def memory_stats():
+async def get_memory_stats():
     """Retorna estatísticas detalhadas de memória."""
+    
     if 'memory_manager' not in app_components:
         raise HTTPException(status_code=503, detail="Memory Manager not initialized")
     
@@ -336,8 +358,9 @@ async def memory_stats():
     # Adiciona informações extras se disponível
     if 'brain' in app_components:
         try:
-            # Pode adicionar estatísticas do brain se necessário
-            pass
+            brain_stats = app_components['brain'].get_memory_stats()
+            if 'learning' in brain_stats:
+                stats['learning'] = brain_stats['learning']
         except:
             pass
     
@@ -346,7 +369,7 @@ async def memory_stats():
 @app.post("/v1/messages")
 async def handle_message(request: Dict[str, Any]):
     """
-    Processa uma mensagem através do bot.
+    Processa uma mensagem através do bot com Learning System.
     
     Payload esperado:
     {
@@ -378,7 +401,7 @@ async def handle_message(request: Dict[str, Any]):
         logger.info(f"📨 Processing message from user: {user_id} via {channel}")
         logger.debug(f"   Message: {message[:100]}...")
         
-        # Processa a mensagem
+        # Processa a mensagem com Learning System
         response = await app_components['brain'].think(
             user_id=user_id,
             message=message,
@@ -386,7 +409,11 @@ async def handle_message(request: Dict[str, Any]):
         )
         
         logger.info(f"✅ Response generated for user: {user_id}")
-        logger.debug(f"   Provider used: {response.get('metadata', {}).get('provider', 'unknown')}")
+        
+        # Log de personalização se disponível
+        if 'personalization' in response.get('metadata', {}):
+            pers = response['metadata']['personalization']
+            logger.debug(f"   Personalization applied: style={pers.get('style')}, expertise={pers.get('expertise')}")
         
         return response
         
@@ -403,6 +430,28 @@ async def handle_message(request: Dict[str, Any]):
                 "channel": channel
             }
         }
+
+@app.get("/v1/users/{user_id}/insights")
+async def get_user_insights(user_id: str):
+    """
+    Retorna insights sobre o usuário do Learning System.
+    """
+    
+    if 'brain' not in app_components:
+        raise HTTPException(
+            status_code=503,
+            detail="Bot brain is not initialized"
+        )
+    
+    try:
+        insights = await app_components['brain'].get_user_insights(user_id)
+        return insights
+    except Exception as e:
+        logger.error(f"Error getting user insights: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving user insights: {str(e)}"
+        )
 
 @app.post("/test/message")
 async def test_message():
@@ -423,89 +472,19 @@ async def test_message():
         "channel": "test"
     }
     
-    try:
-        response = await handle_message(test_request)
-        return {
-            "test": "success",
-            "architecture": "memory_manager",
-            "request": test_request,
-            "response": response
-        }
-    except Exception as e:
-        return {
-            "test": "failed",
-            "error": str(e)
-        }
+    return await handle_message(test_request)
 
-@app.post("/v1/skills/{skill_name}")
-async def invoke_skill(skill_name: str, parameters: Dict[str, Any]):
-    """
-    Invoca uma skill específica diretamente.
-    """
-    
-    if 'skill_registry' not in app_components:
-        raise HTTPException(
-            status_code=503,
-            detail="Skill registry is not initialized"
-        )
-    
-    try:
-        skill = app_components['skill_registry'].get_skill(skill_name)
-        if not skill:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Skill '{skill_name}' not found"
-            )
-        
-        # Verifica se skill está habilitada
-        if not skill.enabled:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Skill '{skill_name}' is disabled"
-            )
-        
-        result = await skill.execute(parameters, {})
-        
-        return {
-            "skill": skill_name,
-            "result": result,
-            "metadata": skill.get_metadata()
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error executing skill {skill_name}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/v1/skills")
-async def list_skills():
-    """Lista todas as skills disponíveis."""
-    if 'skill_registry' not in app_components:
-        return {"skills": [], "error": "Skill registry not initialized"}
-    
-    skills = []
-    for skill_name in app_components['skill_registry'].list_skills():
-        skill = app_components['skill_registry'].get_skill(skill_name)
-        if skill:
-            skills.append({
-                "name": skill_name,
-                "enabled": skill.enabled,
-                "metadata": skill.get_metadata()
-            })
-    
-    return {"skills": skills}
-
+# IMPORTANTE: Usar porta padrão 8000
 if __name__ == "__main__":
-    # Configurações de desenvolvimento
-    port = int(os.getenv("PORT", 8000))
+    # Define a porta padrão como 8000 (padrão FastAPI)
+    port = int(os.getenv("PORT", "8000"))
     
-    logger.info(f"Starting server on port {port}...")
+    logger.info(f"🚀 Starting server on port {port}...")
     
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=port,
-        reload=os.getenv("BOT_ENV", "production").lower() == "development",
-        log_level=os.getenv("LOG_LEVEL", "info").lower()
+        reload=False,
+        log_level="info"
     )

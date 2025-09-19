@@ -1,84 +1,144 @@
-bot:
-  id: "mesh-analyst-001"
-  name: "Mesh"
-  type: "financial_analyst"
-  personality_template: "mesh_analyst.yaml"
+# bot_config.yaml - Configuração do Bot Framework
+# WFinance - Mesh Financial Analyst
+# Version: 3.0.0 - Com Sistema de Aprendizagem
 
+bot:
+  name: "Mesh"
+  description: "Analista Financeiro BPO com aprendizado contínuo"
+  version: "3.0.0"
+  
+personality:
+  style: "professional"
+  tone: "friendly"
+  expertise:
+    - "Análise Financeira"
+    - "BPO"
+    - "Consultoria Empresarial"
+    - "Gestão de Fluxo de Caixa"
+    - "Impostos e Tributação"
+  
 llm:
-  primary:
-    type: "azure_openai"
-    endpoint: "${AZURE_OPENAI_ENDPOINT}"
-    api_key: "${AZURE_OPENAI_KEY}"
-    deployment_name: "${AZURE_OPENAI_DEPLOYMENT}"
-    model: "${AZURE_OPENAI_MODEL}"
-    api_version: "${AZURE_OPENAI_API_VERSION}"
+  primary_model:
+    provider: "azure_openai"
+    model: "gpt-4o"
     temperature: 0.7
     max_tokens: 2000
-
-  fallback_llm:
-    type: "claude"
-    api_key: "${ANTHROPIC_API_KEY}"
-    model: "claude-opus-4-1-20250805"
+    timeout: 30
+    
+  fallback_model:
+    provider: "claude"
+    model: "claude-3-opus-20240229"
+    temperature: 0.7
     max_tokens: 2000
-
-cosmos:
-  endpoint: "${AZURE_COSMOS_ENDPOINT}"
-  key: "${AZURE_COSMOS_KEY}"
-  database: "bot_memory"
-  ttl_days: 90
-
-blob_storage:
-  connection_string: "${AZURE_STORAGE_CONNECTION_STRING}"
-  container_documents: "bot-documents"
-  container_media: "bot-media"
-  container_logs: "bot-logs"
-
+    timeout: 40
+    
 memory:
-  short_term:
-    max_messages: 20
-    ttl_minutes: 30
-  long_term:
-    enabled: true
-    ttl_days: 90
-    max_memories_per_user: 1000
+  enabled: true
+  max_messages: 10
+  storage:
+    hot:
+      enabled: true
+      ttl_minutes: 30
+      max_items: 100
+    warm:
+      enabled: true
+      ttl_days: 30
+      max_items: 1000
+    cold:
+      enabled: true
+      ttl_days: 90
+      compression: true
+      
+  # NOVO: Configurações do Sistema de Aprendizagem
   learning:
     enabled: true
-    min_confidence: 0.7
     auto_learn: true
-
+    min_confidence: 0.7
+    pattern_detection:
+      enabled: true
+      min_occurrences: 3
+      time_window_hours: 168  # 7 dias
+    user_profiling:
+      enabled: true
+      update_frequency: "immediate"
+      style_detection: true
+      expertise_tracking: true
+    personalization:
+      enabled: true
+      adapt_style: true
+      adapt_length: true
+      use_patterns: true
+    storage:
+      provider: "cosmos"  # ou "memory" para testes locais
+      collection: "user_profiles"
+      
 skills:
-  registry:
-    - name: "api_caller"
-      enabled: true
-      config:
-        timeout: 30
-        retry_count: 3
-    - name: "report_generator"
-      enabled: true
-      config:
-        templates_path: "templates/reports"
-    - name: "image_generator"
-      enabled: false
-      config:
-        provider: "dall-e"
-
-interfaces:
-  teams:
-    enabled: true
-    app_id: "${TEAMS_APP_ID}"
-    app_password: "${TEAMS_APP_PASSWORD}"
-  email:
-    enabled: true
-    smtp_server: "smtp.office365.com"
-    port: 587
-  whatsapp:
-    enabled: false
-
+  enabled: true
+  available:
+    - api_caller
+    - report_generator
+    - data_analyzer
+    - notification_sender
+    
+teams:
+  enabled: true
+  app_id: "${MICROSOFT_APP_ID}"
+  app_password: "${MICROSOFT_APP_PASSWORD}"
+  tenant_id: "${MICROSOFT_APP_TENANT_ID}"
+  
 monitoring:
-  application_insights:
-    enabled: true
-    connection_string: "${APP_INSIGHTS_CONNECTION_STRING}"
+  enabled: true
   metrics:
-    track_usage: true
-    track_costs: true
-    track_performance: true
+    enabled: true
+    port: 9090
+  logging:
+    level: "INFO"
+    format: "json"
+    
+  # NOVO: Métricas de Aprendizagem
+  learning_metrics:
+    track_satisfaction: true
+    track_patterns: true
+    track_personalization: true
+    export_interval_minutes: 60
+    
+security:
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 60
+  encryption:
+    enabled: true
+    at_rest: true
+    in_transit: true
+    
+# NOVO: Configurações de Aprendizagem Avançadas
+advanced_learning:
+  pattern_types:
+    - recurring_questions
+    - daily_routines
+    - topic_sequences
+    - satisfaction_signals
+    - expertise_indicators
+  
+  adaptation_rules:
+    - if: "user_expertise == 'expert'"
+      then: "use_technical_terms = true"
+    - if: "satisfaction_score < 0.5"
+      then: "request_feedback = true"
+    - if: "time_of_day in ['morning']"
+      then: "greeting_style = 'energetic'"
+      
+  feedback_collection:
+    enabled: true
+    implicit: true  # Detecta satisfação automaticamente
+    explicit: false  # Não pede feedback direto
+    
+# Configurações de Deploy
+deployment:
+  environment: "${ENVIRONMENT:-development}"
+  azure:
+    resource_group: "rg-wf-ia-gpt41"
+    webapp_name: "meshbrain"
+    acr_name: "meshbrainregistry"
+    cosmos_db: "meshbrain-cosmos"
+    storage_account: "meshbrainstorage"
