@@ -22,7 +22,6 @@ class BotFrameworkHandler:
         self._setup_routes()
         
         # Configurações do Bot Framework - tenta múltiplas variáveis
-        import os
         self.app_id = (
             os.getenv('MICROSOFT_APP_ID') or 
             os.getenv('TEAMS_APP_ID') or
@@ -81,10 +80,38 @@ class BotFrameworkHandler:
                     return Response(status_code=200)
                     
             except Exception as e:
-                logger.error(f"Error processing Bot Framework message: {str(e)}")
-                logger.exception("Full traceback:")
-                # Bot Framework espera 200 mesmo em erro para evitar retry
-                return Response(status_code=200)
+                logger.error(f"Error processing Bot Framework message: {str(e)}", exc_info=True)
+                return Response(status_code=500, content=str(e))
+        
+        @self.router.get("/api/health")
+        async def health_check():
+            """Health check endpoint para o Bot Framework"""
+            return JSONResponse({
+                "status": "healthy",
+                "service": "Bot Framework Handler",
+                "app_id_configured": bool(self.app_id),
+                "tenant_id": self.tenant_id
+            })
+        
+        @self.router.post("/api/messages/test")
+        async def test_endpoint(request: Request):
+            """Endpoint de teste para verificar integração"""
+            if os.getenv("BOT_ENV", "production").lower() == "production":
+                raise HTTPException(status_code=403, detail="Test endpoint disabled in production")
+            
+            test_activity = {
+                "type": "message",
+                "text": "Teste de mensagem",
+                "from": {"id": "test_user"},
+                "recipient": {"id": "bot"},
+                "conversation": {"id": "test_conversation"},
+                "channelId": "test",
+                "id": "test_message_id",
+                "serviceUrl": "http://localhost"
+            }
+            
+            response = await self._process_activity(test_activity)
+            return JSONResponse(response if response else {"status": "ok"})
     
     async def _process_activity(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -94,191 +121,172 @@ class BotFrameworkHandler:
         
         # Trata diferentes tipos de activity
         if activity_type == 'message':
-            return await self._handle_message_activity(activity)
+            return await self._handle_message(activity)
         elif activity_type == 'conversationUpdate':
             return await self._handle_conversation_update(activity)
         elif activity_type == 'invoke':
-            return await self._handle_invoke_activity(activity)
+            return await self._handle_invoke(activity)
         else:
-            logger.info(f"Unhandled activity type: {activity_type}")
+            logger.info(f"Received activity type '{activity_type}' - no action needed")
             return None
     
-    async def _handle_message_activity(self, activity: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_message(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         """
         Processa mensagens de texto
         """
         try:
-            # Extrai informações da activity
+            # Extrai informações da mensagem
             text = activity.get('text', '')
             user_id = activity.get('from', {}).get('id', 'unknown')
             user_name = activity.get('from', {}).get('name', 'User')
             conversation_id = activity.get('conversation', {}).get('id', 'unknown')
+            channel_id = activity.get('channelId', 'unknown')
             service_url = activity.get('serviceUrl', '')
             
-            logger.info(f"Processing message from {user_name} ({user_id}): {text}")
+            logger.info(f"Processing message from {user_name} ({user_id}): {text[:50]}...")
             
-            # Processa com o Brain
+            # Processa através do Brain
             response = await self.brain.think(
                 user_id=user_id,
                 message=text,
-                channel='teams'
+                channel=channel_id,
+                metadata={
+                    'user_name': user_name,
+                    'conversation_id': conversation_id,
+                    'service_url': service_url,
+                    'channel_id': channel_id,
+                    'activity_id': activity.get('id'),
+                    'locale': activity.get('locale', 'pt-BR')
+                }
             )
             
-            logger.info(f"Bot brain response: {response.get('response', 'No response')[:100]}")
+            # Formata resposta para o Bot Framework
+            reply_activity = {
+                'type': 'message',
+                'from': activity.get('recipient'),
+                'recipient': activity.get('from'),
+                'conversation': activity.get('conversation'),
+                'text': response.get('response', 'Desculpe, não consegui processar sua mensagem.'),
+                'replyToId': activity.get('id'),
+                'locale': activity.get('locale', 'pt-BR')
+            }
             
-            # Envia resposta de volta ao Bot Framework
-            if service_url and activity.get('id'):
-                logger.info(f"Sending reply to service_url: {service_url}")
-                await self._send_reply(activity, response['response'])
+            # Se precisar enviar a resposta proativamente
+            if service_url:
+                await self._send_proactive_message(service_url, conversation_id, reply_activity)
+                return None  # Retorna None quando enviado proativamente
             else:
-                logger.warning(f"Cannot send reply - missing service_url or activity.id")
-            
-            # Retorna vazio - já enviamos a resposta diretamente
-            return None
-            
+                return reply_activity
+                
         except Exception as e:
-            logger.error(f"Error handling message activity: {str(e)}")
-            # Envia mensagem de erro
-            if activity.get('serviceUrl') and activity.get('id'):
-                await self._send_reply(
-                    activity, 
-                    "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente."
-                )
-            return None
+            logger.error(f"Error handling message: {str(e)}", exc_info=True)
+            return {
+                'type': 'message',
+                'text': f'Erro ao processar mensagem: {str(e)}'
+            }
     
     async def _handle_conversation_update(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Trata quando o bot é adicionado/removido de uma conversa
+        Trata atualizações de conversa (usuários entrando/saindo)
         """
         members_added = activity.get('membersAdded', [])
+        members_removed = activity.get('membersRemoved', [])
         
+        # Envia mensagem de boas-vindas para novos membros
         for member in members_added:
-            # Se o bot foi adicionado
-            if member.get('id') == activity.get('recipient', {}).get('id'):
-                # Envia mensagem de boas-vindas
-                welcome_message = (
-                    f"Olá! Sou {self.settings.bot.name}, "
-                    f"seu assistente de {self.settings.bot.type}. "
-                    "Como posso ajudar você hoje?"
-                )
-                await self._send_reply(activity, welcome_message)
+            if member.get('id') != activity.get('recipient', {}).get('id'):
+                logger.info(f"New member joined: {member.get('name', 'Unknown')}")
+                return {
+                    'type': 'message',
+                    'text': f"Olá! Sou o Mesh, seu assistente financeiro de BPO. Como posso ajudá-lo hoje?"
+                }
+        
+        # Log quando membros saem
+        for member in members_removed:
+            logger.info(f"Member left: {member.get('name', 'Unknown')}")
         
         return None
     
-    async def _handle_invoke_activity(self, activity: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_invoke(self, activity: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Trata invocações especiais (ex: cards adaptativos)
+        Trata invocações especiais (cards adaptativos, etc.)
         """
         invoke_name = activity.get('name', '')
-        logger.info(f"Handling invoke: {invoke_name}")
+        logger.info(f"Received invoke: {invoke_name}")
         
-        # Por enquanto, retorna sucesso
+        # Retorna resposta padrão para invokes
         return {
-            "status": 200,
-            "body": {}
+            'status': 200,
+            'body': {}
         }
     
-    async def _send_reply(self, activity: Dict[str, Any], text: str):
+    async def _send_proactive_message(self, service_url: str, conversation_id: str, activity: Dict[str, Any]):
         """
-        Envia uma resposta de volta ao Bot Framework
+        Envia mensagem proativa para o Teams
         """
         try:
-            service_url = activity.get('serviceUrl', '').rstrip('/')
-            conversation_id = activity.get('conversation', {}).get('id')
-            
-            # Se não tiver serviceUrl real, apenas loga
-            if not service_url or service_url == "https://test.com":
-                logger.info(f"Test mode - would send reply: {text[:100]}")
-                return
-            
-            activity_id = activity.get('id')
-            
-            if not all([service_url, conversation_id, activity_id]):
-                logger.warning("Missing required fields to send reply")
-                return
-            
-            # URL para enviar a resposta
-            reply_url = f"{service_url}/v3/conversations/{conversation_id}/activities/{activity_id}"
-            
-            # Cria a mensagem de resposta
-            reply_activity = {
-                "type": "message",
-                "text": text,
-                "from": activity.get('recipient'),
-                "recipient": activity.get('from'),
-                "conversation": activity.get('conversation'),
-                "replyToId": activity_id
-            }
-            
             # Obtém token de autenticação se configurado
             headers = {
-                "Content-Type": "application/json"
+                'Content-Type': 'application/json'
             }
             
             if self.app_id and self.app_password:
                 token = await self._get_auth_token()
                 if token:
-                    headers["Authorization"] = f"Bearer {token}"
-                else:
-                    logger.warning("Failed to get auth token, sending without authentication")
+                    headers['Authorization'] = f'Bearer {token}'
             
-            # Envia a resposta
+            # Constrói URL para enviar mensagem
+            url = f"{service_url}v3/conversations/{conversation_id}/activities"
+            
+            # Envia mensagem
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    reply_url,
-                    json=reply_activity,
+                    url,
+                    json=activity,
                     headers=headers,
-                    timeout=10.0
+                    timeout=30.0
                 )
                 
-                if response.status_code not in [200, 201, 202]:
-                    logger.error(f"Failed to send reply: {response.status_code} - {response.text}")
+                if response.status_code >= 200 and response.status_code < 300:
+                    logger.info(f"Proactive message sent successfully to conversation {conversation_id}")
                 else:
-                    logger.info("Reply sent successfully")
+                    logger.error(f"Failed to send proactive message: {response.status_code} - {response.text}")
                     
         except Exception as e:
-            logger.error(f"Error sending reply: {str(e)}")
+            logger.error(f"Error sending proactive message: {str(e)}", exc_info=True)
     
     async def _get_auth_token(self) -> str:
         """
-        Obtém token de autenticação do Bot Framework
+        Obtém token de autenticação do Azure AD para Bot Framework
         """
         if not self.app_id or not self.app_password:
-            logger.warning("No app_id or app_password configured")
             return ""
         
         try:
-            # Usa o tenant específico configurado
-            tenant = self.tenant_id if hasattr(self, 'tenant_id') else '9ad45470-e5c8-45d9-a335-b5f311990261'
-            logger.info(f"Attempting auth with tenant: {tenant}, app_id: {self.app_id[:8]}...")
+            # URL de autenticação para single-tenant
+            auth_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
             
-            # URL de autenticação com tenant específico
-            auth_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
-            
-            # Formato correto para Bot Framework single-tenant
             data = {
-                "grant_type": "client_credentials",
-                "client_id": self.app_id.strip(),
-                "client_secret": self.app_password.strip(),
-                "scope": "https://api.botframework.com/.default"
+                'grant_type': 'client_credentials',
+                'client_id': self.app_id,
+                'client_secret': self.app_password,
+                'scope': 'https://api.botframework.com/.default'
             }
             
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     auth_url,
-                    data=data,  # Use data, not json
-                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                    data=data,
+                    timeout=10.0
                 )
                 
                 if response.status_code == 200:
                     token_data = response.json()
-                    logger.info("Successfully obtained auth token")
-                    return token_data.get("access_token", "")
+                    return token_data.get('access_token', '')
                 else:
-                    logger.error(f"Failed to get auth token: {response.status_code}")
-                    logger.error(f"Response: {response.text}")
+                    logger.error(f"Failed to get auth token: {response.status_code} - {response.text}")
                     return ""
                     
         except Exception as e:
-            logger.error(f"Error getting auth token: {str(e)}")
+            logger.error(f"Error getting auth token: {str(e)}", exc_info=True)
             return ""

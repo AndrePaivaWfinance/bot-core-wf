@@ -116,9 +116,18 @@ async def lifespan(app: FastAPI):
                 settings=settings,
                 brain=app_components['brain']
             )
-            # Registra as rotas do Bot Framework
+            
+            # IMPORTANTE: Registrar as rotas do Bot Framework IMEDIATAMENTE
+            # Não esperar pelo startup event
             app.include_router(app_components['bot_framework'].router)
+            logger.info("   ✅ Bot Framework router registered")
             logger.info("   ✅ Bot Framework endpoint ready at /api/messages")
+            
+            # Debug: listar todas as rotas registradas
+            for route in app.routes:
+                if hasattr(route, 'path') and hasattr(route, 'methods'):
+                    if route.methods:
+                        logger.debug(f"   Route: {route.methods} {route.path}")
         else:
             logger.warning("   ⚠️ Teams not configured - Bot Framework handler disabled")
         
@@ -219,244 +228,150 @@ app.include_router(metrics_router)
 async def root():
     """Endpoint raiz com informações do sistema."""
     return {
-        "service": "meshbrain",
+        "message": "Bot Framework is running",
+        "bot": app_components.get('settings', {}).bot.name if 'settings' in app_components else "Mesh",
         "version": "3.0.0",
-        "status": "running",
-        "description": "WFinance Bot Framework - Mesh Financial Analyst",
-        "features": [
-            "Multi-tier Memory System",
-            "Learning System (Phase 4)",
-            "Pattern Detection",
-            "User Personalization"
-        ],
+        "status": "healthy",
         "endpoints": {
-            "health": "/healthz",
-            "docs": "/docs",
             "messages": "/v1/messages",
-            "memory_stats": "/v1/memory/stats",
-            "user_insights": "/v1/users/{user_id}/insights"
+            "teams": "/api/messages",  # Endpoint do Bot Framework
+            "health": "/healthz",
+            "metrics": "/metrics",
+            "docs": "/docs"
         }
     }
 
 @app.get("/healthz")
 async def health_check():
-    """Health check endpoint detalhado."""
-    
+    """
+    Health check endpoint.
+    Verifica o status de todos os componentes críticos.
+    """
     health_status = {
         "status": "ok",
-        "service": "meshbrain",
+        "bot": app_components.get('settings', {}).bot.name if 'settings' in app_components else "Mesh",
         "version": "3.0.0",
-        "architecture": "memory_manager_learning",
-        "timestamp": os.popen('date').read().strip()
+        "components": {}
     }
     
-    # Verifica componentes
-    checks = {}
-    
-    # Settings
-    checks["settings"] = '✅' if 'settings' in app_components else '❌'
-    
-    # Brain
+    # Verifica Brain
     if 'brain' in app_components:
-        checks["brain"] = '✅'
-        brain = app_components['brain']
-        
-        # Verifica providers
-        if brain.primary_provider and brain.primary_provider.is_available():
-            checks["azure_openai"] = '✅'
-            health_status["provider_primary"] = "azure_openai"
-        else:
-            checks["azure_openai"] = '❌'
-            health_status["provider_primary"] = "none"
-        
-        if brain.fallback_provider and brain.fallback_provider.is_available():
-            checks["claude"] = '✅'
-            health_status["provider_fallback"] = "claude"
-        else:
-            checks["claude"] = '⚠️'
-            health_status["provider_fallback"] = "none"
+        health_status["components"]["brain"] = "healthy"
     else:
-        checks["brain"] = '❌'
-    
-    # Memory Manager
-    if 'memory_manager' in app_components:
-        checks["memory_manager"] = '✅'
-        try:
-            mem_stats = app_components['memory_manager'].get_storage_stats()
-            health_status["memory_health"] = mem_stats.get("health", "unknown")
-            health_status["memory_providers"] = {
-                "hot": mem_stats["providers"]["hot"]["available"],
-                "warm": mem_stats["providers"]["warm"]["available"],
-                "cold": mem_stats["providers"]["cold"]["available"]
-            }
-        except:
-            health_status["memory_health"] = "error"
-    else:
-        checks["memory_manager"] = '❌'
-    
-    # Bot Framework / Teams
-    if 'bot_framework' in app_components:
-        checks["bot_framework"] = '✅'
-        health_status["teams_configured"] = True
-    else:
-        checks["bot_framework"] = '⚠️'
-        health_status["teams_configured"] = False
-    
-    # Skills
-    if 'skill_registry' in app_components:
-        checks["skills"] = '✅'
-    else:
-        checks["skills"] = '❌'
-    
-    # Learning System
-    if 'learning_system' in app_components:
-        checks["learning"] = '✅'
-    else:
-        checks["learning"] = '❌'
-    
-    # Retrieval System
-    if 'retrieval_system' in app_components:
-        checks["retrieval"] = '✅'
-    else:
-        checks["retrieval"] = '❌'
-    
-    health_status["checks"] = checks
-    
-    # Environment info
-    health_status["environment"] = {
-        "bot_env": os.getenv("BOT_ENV", "production"),
-        "port": "8000"
-    }
-    
-    # Bot info
-    if 'settings' in app_components:
-        settings = app_components['settings']
-        health_status["bot"] = settings.bot.name
-        health_status["bot_type"] = settings.bot.type
-    
-    # Determina status geral
-    critical_checks = ["brain", "memory_manager"]
-    if any(checks.get(check) == '❌' for check in critical_checks):
-        health_status["status"] = "unhealthy"
-    elif checks.get("azure_openai") == '❌' and checks.get("claude") != '✅':
+        health_status["components"]["brain"] = "not_initialized"
         health_status["status"] = "degraded"
-        health_status["warning"] = "No LLM providers available"
+    
+    # Verifica Memory Manager
+    if 'memory_manager' in app_components:
+        try:
+            stats = app_components['memory_manager'].get_storage_stats()
+            health_status["components"]["memory"] = stats.get('health', 'unknown')
+        except:
+            health_status["components"]["memory"] = "error"
+    
+    # Verifica Bot Framework
+    if 'bot_framework' in app_components:
+        health_status["components"]["teams"] = "healthy"
+        health_status["components"]["bot_framework_configured"] = bool(
+            hasattr(app_components['bot_framework'], 'app_id') and 
+            app_components['bot_framework'].app_id
+        )
     else:
-        health_status["status"] = "healthy"
+        health_status["components"]["teams"] = "not_configured"
     
     return health_status
 
 @app.get("/v1/memory/stats")
 async def get_memory_stats():
-    """Retorna estatísticas detalhadas de memória."""
-    
+    """Endpoint para obter estatísticas de memória."""
     if 'memory_manager' not in app_components:
-        raise HTTPException(status_code=503, detail="Memory Manager not initialized")
+        raise HTTPException(status_code=503, detail="Memory manager not initialized")
     
-    stats = app_components['memory_manager'].get_storage_stats()
-    
-    # Adiciona informações extras se disponível
-    if 'brain' in app_components:
-        try:
-            brain_stats = app_components['brain'].get_memory_stats()
-            if 'learning' in brain_stats:
-                stats['learning'] = brain_stats['learning']
-        except:
-            pass
-    
-    return stats
+    try:
+        stats = app_components['memory_manager'].get_storage_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Error getting memory stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/v1/messages")
 async def handle_message(request: Dict[str, Any]):
     """
-    Processa uma mensagem através do bot com Learning System.
+    Endpoint principal para processar mensagens.
     
-    Payload esperado:
-    {
-        "user_id": "string",
-        "message": "string",
-        "channel": "string" (opcional, default: "http")
-    }
+    Args:
+        request: {
+            "user_id": str,
+            "message": str,
+            "channel": str (optional),
+            "metadata": dict (optional)
+        }
+    
+    Returns:
+        {
+            "response": str,
+            "user_id": str,
+            "metadata": dict
+        }
     """
+    if 'brain' not in app_components:
+        raise HTTPException(
+            status_code=503, 
+            detail="Bot brain not initialized. Please wait for startup to complete."
+        )
     
     # Validação de entrada
     user_id = request.get("user_id")
     message = request.get("message")
-    channel = request.get("channel", "http")
     
     if not user_id or not message:
         raise HTTPException(
-            status_code=400,
-            detail="Both 'user_id' and 'message' are required"
+            status_code=400, 
+            detail="user_id and message are required"
         )
     
-    # Verifica se o brain está disponível
-    if 'brain' not in app_components:
-        raise HTTPException(
-            status_code=503,
-            detail="Bot brain is not initialized. Please check the logs."
-        )
-    
+    # Processa mensagem
     try:
-        logger.info(f"📨 Processing message from user: {user_id} via {channel}")
-        logger.debug(f"   Message: {message[:100]}...")
+        brain = app_components['brain']
+        channel = request.get("channel", "http")
+        metadata = request.get("metadata", {})
         
-        # Processa a mensagem com Learning System
-        response = await app_components['brain'].think(
-            user_id=user_id,
-            message=message,
-            channel=channel
+        # Chama o cérebro do bot
+        response = await brain.think(
+            user_id=user_id, 
+            message=message, 
+            channel=channel,
+            metadata=metadata
         )
-        
-        logger.info(f"✅ Response generated for user: {user_id}")
-        
-        # Log de personalização se disponível
-        if 'personalization' in response.get('metadata', {}):
-            pers = response['metadata']['personalization']
-            logger.debug(f"   Personalization applied: style={pers.get('style')}, expertise={pers.get('expertise')}")
         
         return response
         
     except Exception as e:
-        logger.error(f"Error processing message: {str(e)}")
-        logger.exception("Full traceback:")
-        
-        # Retorna erro mais amigável
-        return {
-            "response": "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.",
-            "metadata": {
-                "error": True,
-                "error_type": type(e).__name__,
-                "channel": channel
-            }
-        }
+        logger.error(f"Error processing message: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/v1/users/{user_id}/insights")
 async def get_user_insights(user_id: str):
     """
-    Retorna insights sobre o usuário do Learning System.
+    Obtém insights sobre um usuário baseado no histórico.
     """
-    
-    if 'brain' not in app_components:
-        raise HTTPException(
-            status_code=503,
-            detail="Bot brain is not initialized"
-        )
+    if 'learning_system' not in app_components:
+        raise HTTPException(status_code=503, detail="Learning system not initialized")
     
     try:
-        insights = await app_components['brain'].get_user_insights(user_id)
-        return insights
+        insights = await app_components['learning_system'].get_user_insights(user_id)
+        return {
+            "user_id": user_id,
+            "insights": insights
+        }
     except Exception as e:
         logger.error(f"Error getting user insights: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error retrieving user insights: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/test/message")
 async def test_message():
     """
-    Endpoint de teste para verificar se o bot está funcionando.
+    Endpoint de teste para enviar uma mensagem de exemplo.
     Desabilitado em produção.
     """
     
