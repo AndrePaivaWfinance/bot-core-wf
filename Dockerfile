@@ -1,5 +1,8 @@
-# Especificar plataforma AMD64 para Azure
-FROM --platform=linux/amd64 python:3.11-slim
+# Multi-platform Dockerfile
+# Para Mac M1/M2 (local): docker build -t mesh:local .
+# Para Azure (deploy): docker buildx build --platform linux/amd64 -t mesh:azure .
+
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app

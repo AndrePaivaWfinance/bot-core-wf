@@ -12,8 +12,14 @@ aiohttp==3.9.1
 # Azure services
 azure-cosmos==4.7.0
 azure-storage-blob==12.20.0
-openai==1.12.0  # Para Azure OpenAI
-anthropic==0.34.0  # Para Claude fallback
+openai==1.12.0
+anthropic==0.34.0
+
+# Bot Framework - ESSENCIAL PARA TEAMS
+# Usando versões mais recentes que podem ter menos conflitos
+botbuilder-core==4.15.0
+botbuilder-schema==4.15.0
+botframework-connector==4.15.0
 
 # Data processing
 numpy==1.26.2
@@ -27,13 +33,7 @@ pyyaml==6.0.1
 jinja2==3.1.4
 python-multipart==0.0.9
 
-# Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
-
-# Bot Framework (comentado por enquanto - adicionar quando for implementar Teams)
-# botbuilder-core==4.14.0
-# botbuilder-schema==4.14.0
-
-# Monitoring (opcional)
-# opencensus-ext-azure==1.1.13
+# Dependências de autenticação necessárias
+msal>=1.20.0
+PyJWT>=2.4.0
+cryptography>=2.1.4
